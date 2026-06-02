@@ -1,0 +1,8 @@
+opencv-python
+opencv-contrib-python
+numpy
+pyzbar
+zxing-cpp
+mss
+qrcode
+Pillow

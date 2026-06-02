@@ -1,0 +1,4 @@
+qrcode
+Pillow
+opencv-python
+numpy
