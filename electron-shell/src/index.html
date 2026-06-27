@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>源码视频加码解码器</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div class="window-dots" aria-label="窗口控制">
+          <button class="window-control close" data-window-action="close" title="关闭" aria-label="关闭窗口"></button>
+          <button class="window-control minimize" data-window-action="minimize" title="最小化" aria-label="最小化窗口"></button>
+          <button class="window-control maximize" data-window-action="maximize" title="最大化或还原" aria-label="最大化或还原窗口"></button>
+        </div>
+
+        <div class="brand-block">
+          <p class="side-kicker">视频传输</p>
+          <h1>源码视频<br />加码解码器</h1>
+        </div>
+
+        <nav class="tabs" aria-label="工具页签">
+          <button class="tab active" data-tab="encode"><span class="nav-icon">◇</span>视频加码</button>
+          <button class="tab" data-tab="decode"><span class="nav-icon">↻</span>视频解码</button>
+          <button class="tab" data-tab="media"><span class="nav-icon">▷</span>播放与录制</button>
+          <button class="tab" data-tab="text"><span class="nav-icon">▣</span>文本二维码</button>
+        </nav>
+
+        <div class="hakimi-pair" aria-label="两只哈基米装饰">
+          <div class="hakimi cat-left">
+            <span class="ear left"></span><span class="ear right"></span>
+            <span class="stripe stripe-one"></span><span class="stripe stripe-two"></span>
+            <span class="eye left"></span><span class="eye right"></span>
+            <span class="nose"></span><span class="mouth"></span>
+          </div>
+          <div class="hakimi cat-right">
+            <span class="ear left"></span><span class="ear right"></span>
+            <span class="stripe stripe-one"></span><span class="stripe stripe-two"></span>
+            <span class="eye left"></span><span class="eye right"></span>
+            <span class="nose"></span><span class="mouth"></span>
+          </div>
+        </div>
+
+        <div class="assistant-card">
+          <span class="assistant-icon">✓</span>
+          <div>
+            <strong>离线传输助手</strong>
+            <small>浅色企业工具 / 本地运行</small>
+          </div>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="header">
+          <div>
+            <p class="eyebrow">Electron GUI</p>
+            <h2>源码视频加码解码器</h2>
+          </div>
+          <div class="badge" id="runtimeBadge">检测中...</div>
+        </header>
+
+        <section class="hero-strip">
+          <div>
+            <p class="section-label">工作项</p>
+            <p class="summary">加码、播放、录制和解码集中在一个窗口。默认生成单个 4QR 视频，并带自描述参数二维码。</p>
+          </div>
+          <div class="performance-card">
+            <span>默认性能</span>
+            <strong id="performanceValue">6GB / 6 并发</strong>
+          </div>
+        </section>
+
+        <section class="progress-card" id="progressCard" aria-live="polite">
+          <div class="progress-copy">
+            <p class="section-label">分片进度</p>
+            <h3 id="progressTitle">等待任务</h3>
+            <p id="progressDetail">启动加码或解码后按分片实时刷新。</p>
+          </div>
+          <div class="progress-meter">
+            <strong id="progressPercent">0%</strong>
+            <div class="progress-track" aria-hidden="true"><span id="progressFill"></span></div>
+            <small id="progressMeta">0 / 0 分片</small>
+          </div>
+        </section>
+
+        <section class="panel active" id="panel-encode">
+          <div class="panel-title">
+            <div>
+              <p class="section-label">视频加码</p>
+              <h3>生成可录屏传输的视频</h3>
+            </div>
+            <span class="soft-badge">4QR / FEC</span>
+          </div>
+          <div class="form-grid">
+            <label>源码压缩包<input id="encSource" placeholder="source.zip / tar.gz / tgz / tar / 7z" /></label>
+            <button class="pick" data-pick="encSource" data-kind="archive">选择压缩包</button>
+            <label>输出视频<input id="encOutput" value="hd_secure_stream.mp4" /></label>
+            <button class="pick" data-pick="encOutput" data-kind="saveVideo">保存为</button>
+          </div>
+          <div class="options-row">
+            <label><input type="checkbox" id="encFastFec" checked /> 4QR / 30FPS / repeat=2 / FEC 100+12</label>
+            <label>额外参数<input id="encExtra" value="--workers 6 --memory-gb 6" placeholder="可追加 --param-intro-seconds 10" /></label>
+          </div>
+          <button class="primary" id="runEncode">开始加码</button>
+        </section>
+
+        <section class="panel" id="panel-decode">
+          <div class="panel-title">
+            <div>
+              <p class="section-label">视频解码</p>
+              <h3>从录屏视频还原源码与依赖</h3>
+            </div>
+            <span class="soft-badge">自动参数</span>
+          </div>
+          <div class="form-grid">
+            <label>录屏/录像文件<input id="decVideo" placeholder="screen_record.mp4" /></label>
+            <button class="pick" data-pick="decVideo" data-kind="file">选择文件</button>
+            <label>manifest.json<input id="decManifest" placeholder="旧视频/FEC 可选；新视频会自动读取参数二维码" /></label>
+            <button class="pick" data-pick="decManifest" data-kind="file">选择文件</button>
+            <label>输出目录<input id="decOutput" value="reconstructed_project" /></label>
+            <button class="pick" data-pick="decOutput" data-kind="dir">选择目录</button>
+          </div>
+          <div class="options-row">
+            <label><input type="checkbox" id="decFastFec" checked /> 4QR / 30FPS / FEC 解码预设</label>
+            <label>额外参数<input id="decExtra" value="--workers 6 --memory-gb 6" placeholder="可追加 --noise-robust" /></label>
+          </div>
+          <button class="primary" id="runDecode">开始解码</button>
+        </section>
+
+        <section class="panel media-panel" id="panel-media">
+          <div class="panel-title">
+            <div>
+              <p class="section-label">播放与录制</p>
+              <h3>二维码视频传输工作台</h3>
+            </div>
+            <span class="soft-badge">全屏 / 循环 / 录后解码</span>
+          </div>
+
+          <div class="media-layout">
+            <section class="media-tool" aria-labelledby="playerHeading">
+              <div class="tool-heading">
+                <div>
+                  <p class="section-label">专用播放器</p>
+                  <h4 id="playerHeading">播放加码视频</h4>
+                </div>
+                <span class="media-state">软件渲染</span>
+              </div>
+              <div class="form-grid compact media-form">
+                <label>视频文件<input id="playerVideo" placeholder="hd_secure_stream.mp4" /></label>
+                <button class="pick" data-pick="playerVideo" data-kind="video" type="button">选择视频</button>
+              </div>
+              <div class="media-options">
+                <label><input type="checkbox" id="playerAutoplay" checked /> 打开后自动播放</label>
+                <label><input type="checkbox" id="playerLoop" checked /> 循环播放</label>
+                <label><input type="checkbox" id="playerFullscreen" checked /> 直接全屏</label>
+              </div>
+              <div class="button-row">
+                <button class="primary" id="openPlayer" type="button">打开专用播放器</button>
+                <button class="secondary" id="openSystemPlayer" type="button">系统播放器</button>
+              </div>
+              <p class="inline-status" id="playerStatus" aria-live="polite">等待选择视频。</p>
+            </section>
+
+            <section class="media-tool recorder-tool" aria-labelledby="recorderHeading">
+              <div class="tool-heading">
+                <div>
+                  <p class="section-label">屏幕录制</p>
+                  <h4 id="recorderHeading">录制云桌面画面</h4>
+                </div>
+                <span class="record-indicator" id="recordIndicator"><i aria-hidden="true"></i><span>已就绪</span></span>
+              </div>
+              <div class="form-grid compact media-form">
+                <label>录屏文件<input id="recordOutput" placeholder="screen_recordings/screen-record.mp4" /></label>
+                <button class="pick" data-pick="recordOutput" data-kind="saveRecording" type="button">保存为</button>
+                <label>录制屏幕<select id="recordMonitor"><option value="1">屏幕 1</option></select></label>
+                <button class="pick" id="refreshMonitors" type="button">刷新屏幕</button>
+              </div>
+
+              <div class="record-settings">
+                <fieldset class="segmented-field">
+                  <legend>录制帧率</legend>
+                  <div class="segmented-control">
+                    <label><input type="radio" name="recordFps" value="30" checked /><span>30 FPS</span></label>
+                    <label><input type="radio" name="recordFps" value="60" /><span>60 FPS</span></label>
+                  </div>
+                </fieldset>
+                <label class="compact-field">倒计时
+                  <select id="recordCountdown">
+                    <option value="3">3 秒</option>
+                    <option value="5">5 秒</option>
+                    <option value="0">无</option>
+                  </select>
+                </label>
+              </div>
+
+              <label class="region-field">录制区域（可选）
+                <input id="recordRegion" placeholder="left,top,width,height" />
+              </label>
+              <label class="auto-decode"><input type="checkbox" id="recordAutoDecode" checked /> 录制完成后自动解码</label>
+
+              <div class="button-row">
+                <button class="primary record-start" id="startRecording" type="button">开始录制</button>
+                <button class="danger" id="stopRecording" type="button" disabled>停止并保存</button>
+              </div>
+              <p class="inline-status recorder-status" id="recordStatus" aria-live="polite"><span id="recordElapsed">00:00</span><span id="recordStatusText">等待录制。</span></p>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel" id="panel-text">
+          <div class="panel-title">
+            <div>
+              <p class="section-label">文本二维码</p>
+              <h3>生成或读取单张文本二维码</h3>
+            </div>
+            <span class="soft-badge">微信直扫</span>
+          </div>
+          <div class="text-layout">
+            <div>
+              <h4>生成二维码</h4>
+              <textarea id="textInput" placeholder="输入中文、英文、代码或配置片段"></textarea>
+              <div class="inline-controls">
+                <label>模式
+                  <select id="textCodec">
+                    <option value="wechat">微信直扫：中英文原文</option>
+                    <option value="auto">高容量压缩：需本工具解码</option>
+                  </select>
+                </label>
+                <label>纠错
+                  <select id="textEcc">
+                    <option value="M">M</option>
+                    <option value="L">L</option>
+                    <option value="Q">Q</option>
+                    <option value="H">H</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-grid compact">
+                <label>输出图片<input id="textOutput" value="text-qr.png" /></label>
+                <button class="pick" data-pick="textOutput" data-kind="savePng">保存为</button>
+              </div>
+              <button class="primary" id="runTextEncode">生成二维码</button>
+            </div>
+            <div>
+              <h4>解码二维码</h4>
+              <div class="form-grid compact">
+                <label>输入图片<input id="textImage" placeholder="text-qr.png" /></label>
+                <button class="pick" data-pick="textImage" data-kind="file">选择图片</button>
+              </div>
+              <button class="primary" id="runTextDecode">解码图片</button>
+              <textarea id="textDecoded" placeholder="解码结果会显示在这里"></textarea>
+            </div>
+            <figure class="qr-preview">
+              <img id="qrPreview" alt="二维码预览" />
+              <figcaption>生成后在这里直接显示，微信扫码即可使用。</figcaption>
+            </figure>
+          </div>
+        </section>
+
+        <section class="log">
+          <div class="log-head">
+            <h3>运行日志</h3>
+            <div class="log-actions">
+              <button class="secondary" id="copyLog">复制日志</button>
+              <button class="secondary" id="clearLog">清空</button>
+            </div>
+          </div>
+          <pre id="logOutput" tabindex="0">等待操作...</pre>
+        </section>
+      </section>
+    </main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

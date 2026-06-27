@@ -2,3 +2,4 @@ qrcode
 Pillow
 opencv-python
 numpy
+imageio-ffmpeg

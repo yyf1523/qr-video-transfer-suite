@@ -1,6 +1,7 @@
 __pycache__/
 *.py[cod]
 *.log
+node_modules/
 
 build/
 releases/
@@ -21,3 +22,6 @@ wheels-windows/
 *.jar
 *.AppImage
 *.exe
+
+!electron-shell/assets/*.png
+!electron-shell/assets/*.ico

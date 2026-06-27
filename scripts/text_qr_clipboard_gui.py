@@ -18,12 +18,19 @@ if str(SCRIPT_DIR) not in sys.path:
 import text_qr_clipboard as core
 
 
+CODEC_OPTIONS = {
+    "微信直扫：中英文原文": "wechat",
+    "高容量压缩：需本工具解码": "auto",
+}
+
+
 class TextQrGui:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("文本二维码剪贴板")
         self.root.geometry("920x720")
         self.image_path = tk.StringVar(value=str((Path.cwd() / "text-qr.png").resolve()))
+        self.codec_label = tk.StringVar(value="微信直扫：中英文原文")
         self.decode_image_path = tk.StringVar()
         self.status_queue: queue.Queue[str] = queue.Queue()
 
@@ -43,8 +50,17 @@ class TextQrGui:
         ttk.Label(encode_frame, text="输出图片").grid(row=0, column=0, sticky="w")
         ttk.Entry(encode_frame, textvariable=self.image_path).grid(row=0, column=1, sticky="ew", padx=(8, 8))
         ttk.Button(encode_frame, text="浏览", command=self.browse_output_image).grid(row=0, column=2)
-        ttk.Button(encode_frame, text="从剪贴板粘贴", command=self.paste_text).grid(row=0, column=3, padx=(8, 0))
-        ttk.Button(encode_frame, text="生成图片", command=self.encode_text).grid(row=0, column=4, padx=(8, 0))
+        ttk.Label(encode_frame, text="编码模式").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        codec_box = ttk.Combobox(
+            encode_frame,
+            textvariable=self.codec_label,
+            values=list(CODEC_OPTIONS),
+            state="readonly",
+            width=28,
+        )
+        codec_box.grid(row=1, column=1, sticky="w", padx=(8, 8), pady=(8, 0))
+        ttk.Button(encode_frame, text="从剪贴板粘贴", command=self.paste_text).grid(row=1, column=3, padx=(8, 0), pady=(8, 0))
+        ttk.Button(encode_frame, text="生成图片", command=self.encode_text).grid(row=1, column=4, padx=(8, 0), pady=(8, 0))
 
         self.text_input = tk.Text(main, height=10, wrap=tk.WORD)
         self.text_input.grid(row=1, column=0, sticky="nsew", pady=(8, 12))
@@ -91,18 +107,19 @@ class TextQrGui:
         self.text_input.insert("1.0", text)
 
     def encode_text(self) -> None:
-        text = self.text_input.get("1.0", tk.END)
+        text = self.text_input.get("1.0", "end-1c")
         output = self.image_path.get().strip()
         if not output:
             messagebox.showerror("缺少输出路径", "请选择二维码图片输出路径。")
             return
-        args = core.parse_args(["encode", text, "-o", output])
+        codec = CODEC_OPTIONS[self.codec_label.get()]
+        args = core.parse_args(["encode", text, "-o", output, "--codec", codec])
         try:
             args.func(args)
         except SystemExit as exc:
             messagebox.showerror("生成失败", str(exc))
             return
-        self.status_var.set(f"已生成: {Path(output).resolve()}")
+        self.status_var.set(f"已生成: {Path(output).resolve()} ({self.codec_label.get()})")
 
     def decode_image(self) -> None:
         image = self.decode_image_path.get().strip()
@@ -116,7 +133,11 @@ class TextQrGui:
         if not payloads:
             messagebox.showerror("解码失败", "没有识别到二维码文本。")
             return
-        text = core.parse_text_payload(payloads[0])
+        try:
+            text = core.parse_text_payload(payloads[0])
+        except ValueError as exc:
+            messagebox.showerror("解码失败", f"二维码文本载荷校验失败：{exc}")
+            return
         self.text_output.delete("1.0", tk.END)
         self.text_output.insert("1.0", text)
         self.status_var.set(f"已解码 {len(text)} 个字符")

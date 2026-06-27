@@ -1,6 +1,34 @@
-# QR Video Optical Transfer Scripts
+# QR Video Transfer Suite
 
-这套脚本对应 Gemini 对话里的最终方案：内网 Linux 发送端把源码压缩包和 `lib/` 下的 jar 依赖编码成带红色定位框的二维码视频；外网 Windows 接收端读取手机录像，自动透视矫正、CRC32 校验、去重并重构文件。
+源码视频加码解码器：把源码及离线依赖整理成压缩包，编码成带红色定位框的 4QR 视频，在 UOS/云桌面中全屏播放，再由接收端录屏解码还原压缩包。项目包含命令行脚本、Tk 图形界面和 Electron 播放/录制/解码工作台。
+
+## 功能概览
+
+- Linux/UOS 发送端：生成单个 H.264/yuv420p MP4，默认 4QR / 30FPS / repeat=2 / FEC。
+- Windows/Linux 接收端：读取手机录像或屏幕录制，自动识别前置 `QVP1` 参数二维码并解码。
+- Electron 工作台：集成视频加码、专用播放器、屏幕录制、录后自动解码和文本二维码。
+- UOS 离线包：Release 内提供完整离线包，含 Electron、Python 3.11、依赖、ffmpeg 和软件渲染启动脚本。
+- 文本二维码：支持微信直扫原文模式，也支持高容量压缩模式。
+
+## Release 包
+
+正式发布包在 GitHub Release 中提供：
+
+- `QRVideoTransfer-UOS-full-offline-YYYYMMDD.tar.gz`：UOS/Linux 完整离线包，推荐云桌面直接使用。
+- `QRVideoTransfer-Linux-portable-tools-YYYYMMDD.tar.gz`：Linux 便携命令行工具包。
+- `SHA256SUMS.txt`：发布包校验值。
+
+UOS 完整离线包解压后优先运行：
+
+```bash
+./Start-UOS-AppImage.sh
+```
+
+如果 AppImage/FUSE 受限，使用备用启动器：
+
+```bash
+./Start-UOS-unpacked.sh
+```
 
 ## 离线依赖准备
 
@@ -25,7 +53,7 @@ py -3 -m pip install --no-index --find-links wheels-windows -r requirements-wind
 
 ## 单张图片文本剪贴板
 
-短文本可以不走视频，直接编码成一张二维码图片；另一端解码这张图片即可拿回原文。中文、换行和特殊字符会按 UTF-8 封装。
+短文本可以不走视频，直接编码成一张二维码图片；另一端解码这张图片即可拿回原文。默认是“微信直扫”模式：中文、英文、换行和常见符号都按原文 UTF-8 写入二维码，微信扫码后可以直接查看和复制。
 
 图形界面：
 
@@ -43,6 +71,12 @@ scripts\run_text_qr_gui.cmd
 
 ```bash
 python3 scripts/text_qr_clipboard.py encode "要传输的一段文本" -o text-qr.png
+```
+
+高容量压缩模式适合同一张图里塞更多中英文文本，但扫码后会看到 `QTXT2:` 开头的压缩载荷，必须用本工具解码：
+
+```bash
+python3 scripts/text_qr_clipboard.py encode "要传输的一段较长文本" -o text-qr.png --codec auto
 ```
 
 从系统剪贴板生成图片：
@@ -63,12 +97,12 @@ python3 scripts/text_qr_clipboard.py decode text-qr.png
 python3 scripts/text_qr_clipboard.py decode text-qr.png --copy
 ```
 
-单张二维码容量有限，适合配置片段、命令、错误日志、短 SQL、短 JSON 等文本；大文件仍使用后面的二维码视频传输。
+单张二维码容量有限，适合配置片段、命令、错误日志、短 SQL、短 JSON 等文本；大文件仍使用后面的二维码视频传输。微信直扫模式可读性最好；压缩模式容量更高，但需要接收端运行本工具解码。
 
 ## 发送端：Linux 生成视频
 
 ```bash
-python3 scripts/linux_encoder_hd.py --source source.zip --lib-dir lib -o hd_secure_stream.mp4
+python3 scripts/linux_encoder_hd.py --source source.zip -o hd_secure_stream.mp4
 ```
 
 ### 发送端图形界面：UOS / Linux
@@ -91,7 +125,7 @@ python3 scripts/linux_encoder_gui.py
 sudo apt install python3-tk
 ```
 
-界面里选择源码压缩包、添加一个或多个 jar 目录，预设建议：
+界面里只需选择源码压缩包。源码、Jar 依赖及其他离线依赖应先整理进同一个压缩包，预设建议：
 
 - `本机 1080p 横向 4QR`：输出 `1920x1080` 白色画布，一行横向拼接 4 个 QR，适合本机 1080p 全屏播放录屏，减少播放器黑边。
 - `电脑录屏 2x2 高密度模式`：一帧放 4 个二维码，使用二进制载荷协议，适合电脑屏幕录制，速度明显高于单 QR 模式。
@@ -103,7 +137,7 @@ sudo apt install python3-tk
 内网一键脚本会自动创建 venv、优先使用本目录 `wheels-linux/` 离线 wheel、扫描当前目录：
 
 - 根目录必须有且仅有一个源码压缩包：`*.zip`、`*.tar.gz`、`*.tgz`、`*.tar` 或 `*.7z`。
-- 自动扫描 `lib/`、`libs/`、`dependency/`、`dependencies/`、`deps/`、`jars/` 下的 jar。
+- 不再接收单独 Jar 或依赖目录；依赖必须先放入源码压缩包。
 - 自动扫描当前目录四层以内的 npm 包归档：`*.tgz`、`*.npm`。
 - 如果没有 npm 包归档但存在 `node_modules/`，默认打包成 `qr-video-out/npm-packages.tgz` 一并编码。
 
@@ -115,7 +149,6 @@ bash scripts/encode_auto.sh
 
 ```bash
 OUT_DIR=./qr-video-out INCLUDE_NODE_MODULES=0 bash scripts/encode_auto.sh
-RESUME_MISSING=decode_state/missing_chunks.json bash scripts/encode_auto.sh
 ENCODER_EXTRA_ARGS="--passes 4 --repeat 5" bash scripts/encode_auto.sh
 ENCODER_EXTRA_ARGS="--target-kbps 0.2 --repeat 4 --fps 3" bash scripts/encode_auto.sh
 ```
@@ -144,28 +177,56 @@ ENCODER_EXTRA_ARGS="--payload-mode binary --qr-error-correction H --qr-version 4
 
 这个模式视频本身就是 `1920x1080`，背景纯白，QR 横向居中排列，红框和外白边更窄，适合全屏播放时减少黑边。如果录屏区域不是 1080p，也可以把 `--canvas-width/--canvas-height` 改成录屏区域尺寸，例如 `1080x1028`。
 
-编码视频默认带纯色同步段：
+本机 1080p 横向 4QR + 30FPS + FEC 推荐：
 
-- 开头：纯白 3 秒，用于录屏开始缓冲。
+```bash
+ENCODER_EXTRA_ARGS="--fast-fec-4qr" bash scripts/encode_auto.sh
+```
+
+或直接指定：
+
+```bash
+python3 scripts/linux_encoder_hd.py --source source.zip -o hd_secure_stream.mp4 --fast-fec-4qr
+```
+
+这个预设生成单个 MP4 文件，一帧横向放 4 个 QR，30 FPS、每片重复 2 帧，并按每 100 个数据分片附加 12 个 FEC 校验分片。少量缺片时，接收端会根据参数头或 manifest 自动恢复；缺口过大时本次解码会失败并输出缺失报告，需要提高 `--passes` / `--repeat` 后重新生成完整视频。
+
+编码视频默认带前置参数缓冲：
+
+- 开头：`10` 秒 `QVP1` 参数二维码缓冲，二维码里压缩写入 FPS、repeat、grid、chunk、ECC、FEC、画布尺寸、worker/内存预算等解码参数；文件清单放得下时，也会写入文件名、大小、SHA256 和总分片数。
+- 可选白屏：如需额外白屏，可加 `--intro-seconds N`。
 - 结尾：纯黑 3 秒，用于录屏结束标记。
+
+MP4 播放器兼容性：
+
+- 默认 `--mp4-profile uos`：先用 OpenCV 生成中间视频，再用随包或系统 `ffmpeg` 转成 `H.264 + yuv420p + .mp4`，适合 UOS 默认播放器。
+- 如果缺少 `ffmpeg`，脚本会保留 OpenCV 的 `mp4v` MP4 并打印警告；这种文件可以用于传输/解码，但 UOS 默认播放器可能打不开。
+- 如需保留旧的 OpenCV 直写 MP4，可加 `--mp4-profile opencv`。
+- Electron 图形界面的“播放与录制”页提供专用播放器和屏幕录制器，适合在 UOS/云桌面里全屏循环播放 4QR 视频，再在接收端录制并自动解码。
+
+并发与内存预算：
+
+- 加码端 `--workers 0` 默认自动选择最多 6 个 worker，并发渲染同一帧内的多个二维码；视频写入仍串行，保证帧顺序稳定。
+- `--memory-gb 6` 会写入参数二维码，作为解码端默认排队帧内存预算。
+- 如需手动固定：`--workers 6 --memory-gb 6 --param-intro-seconds 10`。
 
 视频帧顶部会包含两个辅助标记：
 
 - 左上角小二维码：只放分片元数据（文件、序号、总数、CRC、长度），用于快速定位当前分片。
 - 右上角数字：给人工/OCR 看，格式为 `000001/056331`。
 
-也可以直接传多个文件或目录：
+也可以直接传多个压缩包，目录、单独 Jar 和普通文件会被拒绝：
 
 ```bash
-python3 scripts/linux_encoder_hd.py source.zip lib -o hd_secure_stream.mp4 --passes 3 --repeat 4
+python3 scripts/linux_encoder_hd.py source.zip npm-packages.tgz -o hd_secure_stream.mp4 --passes 3 --repeat 4
 ```
 
-默认参数偏向准确率：QR 版本 20、H 级纠错、180 字节/片、6 FPS、每片重复 3 次、整体重复 2 轮。视频开头默认纯白 3 秒，结尾默认纯黑 3 秒。视频会更大更慢，但接收端会用 CRC32 拒绝任何 bit 错误的分片。
+默认参数偏向准确率：QR 版本 20、H 级纠错、180 字节/片、6 FPS、每片重复 3 次、整体重复 2 轮。视频开头默认 10 秒参数二维码，结尾默认纯黑 3 秒。视频会更大更慢，但接收端会用 CRC32 拒绝任何 bit 错误的分片。
 
 发送端会同时输出分片校验文件：
 
-- `hd_secure_stream.manifest.md`：给人排查用，包含每个源码包、每个 jar、每个分片的大小、CRC32 和 SHA256。
-- `hd_secure_stream.manifest.json`：给接收端预加载完整文件清单用，能识别“某个 jar 一个分片都没扫到”的情况。
+- `hd_secure_stream.manifest.md`：给人排查用，包含每个压缩包、每个分片的大小、CRC32 和 SHA256。
+- `hd_secure_stream.manifest.json`：给接收端预加载完整文件清单用；新视频会优先从前置参数二维码自动读取，旧视频或文件清单太大导致参数二维码放不下时再手工提供。
 
 ## 接收端：Windows 解手机录像或屏幕录像
 
@@ -195,11 +256,12 @@ python scripts\win_decoder_gui.py
 如果用电脑录屏，不需要额外录屏软件，解码端可以先录屏再自动解码：
 
 ```powershell
-py -3 scripts\win_decoder_hd.py --record-screen --record-seconds 30 --screen-mode `
+py -3 scripts\win_decoder_hd.py --record-screen --record-seconds 30 `
   --record-output screen_record.mp4 `
-  --manifest-json hd_secure_stream.manifest.json `
   -o reconstructed_project
 ```
+
+新视频开头带 `QVP1` 参数二维码，解码端默认会扫描前 `12` 秒并自动匹配 4QR/30FPS/repeat/FEC/fast-screen 等参数；参数二维码里放得下文件清单时，也会自动补齐 FEC 恢复所需的分片大小。
 
 如果加码端使用 `60 FPS + repeat 5`，解码端使用固定 60 FPS 录屏与每 5 帧抽样：
 
@@ -226,6 +288,29 @@ py -3 scripts\win_decoder_hd.py screen_record.mp4 --screen-grid `
   -o reconstructed_project
 ```
 
+如果加码端使用 `--fast-fec-4qr`，解码端使用 4QR/30FPS/FEC 预设：
+
+```powershell
+py -3 scripts\win_decoder_hd.py screen_record.mp4 -o reconstructed_project
+```
+
+旧视频没有 `QVP1` 参数头时，再手动指定预设：
+
+```powershell
+py -3 scripts\win_decoder_hd.py screen_record.mp4 --screen-fast-fec-4qr `
+  --manifest-json hd_secure_stream.manifest.json `
+  -o reconstructed_project
+```
+
+FEC 恢复需要知道缺失分片的原始大小。新视频会尽量从参数二维码内置文件清单恢复；如果日志提示参数二维码未包含文件清单，或要解旧视频，继续带上 `--manifest-json hd_secure_stream.manifest.json`。
+
+并发和抗噪参数：
+
+- `--workers 0`：默认自动选择最多 6 个 worker 并发识别视频帧。
+- `--memory-gb 6`：默认 6GB 内存预算，用于限制同时排队的解码帧数量。
+- `--noise-robust`：默认开启，快速 zxing 未扫全时会追加对比度、锐化、阈值、形态学等抗噪变体，适合有压缩噪声的录屏。
+- `--no-auto-params`：关闭前置参数二维码自动匹配。
+
 只录屏、不解码：
 
 ```powershell
@@ -250,44 +335,17 @@ MANIFEST_JSON=hd_secure_stream.manifest.json bash scripts/decode_auto.sh phone_r
 ```text
 reconstructed_project\
   source.zip
-  lib\
-    xxx.jar
+  npm-packages.tgz
 ```
 
-## 断点续传
+## Electron 后台任务与日志
 
-接收端默认启用续传状态目录 `decode_state`。每次解码成功且通过 CRC32 的分片都会保存下来；下一次解另一个手机录像时，只要继续使用同一个 `--state-dir`，脚本会自动加载旧分片继续补齐。
-
-```powershell
-py -3 scripts\win_decoder_hd.py first_record.mp4 -o reconstructed_project --state-dir decode_state --manifest-json hd_secure_stream.manifest.json
-py -3 scripts\win_decoder_hd.py second_record.mp4 -o reconstructed_project --state-dir decode_state --manifest-json hd_secure_stream.manifest.json
-```
-
-如果仍有缺片，接收端会输出：
-
-```text
-decode_state\
-  state.json
-  missing_chunks.json
-  missing_report.md
-  chunks\
-```
-
-把 `missing_chunks.json` 带回内网 Linux，在同一批输入文件不变的前提下生成补片视频：
-
-```bash
-python3 scripts/linux_encoder_hd.py --source source.zip --lib-dir lib \
-  --resume-missing missing_chunks.json \
-  -o repair_stream.mp4
-```
-
-再用 Windows 端继续解补片录像：
-
-```powershell
-py -3 scripts\win_decoder_hd.py repair_record.mp4 -o reconstructed_project --state-dir decode_state
-```
-
-不同 jar 包按 `file_type + lib 内相对路径` 独立记录。例如 `lib/a/x.jar` 和 `lib/b/x.jar` 会分别续传，不会只按 basename 混在一起。
+- 视频加码、专用播放、屏幕录制和视频解码由独立后台子进程执行，运行时可以切换页签、生成/解码文本二维码，也可以并行启动另一个视频任务。
+- 每个视频任务按独立 `runId` 管理，某个任务结束不会误停止或解锁其他仍在运行的任务。
+- GUI 按数据/FEC 分片实时显示进度。
+- 加码完成后会自动把输出 MP4 填到专用播放器，减少误选录屏视频或测试视频的情况。
+- 录屏完成后可自动填入解码页并开始解码；界面只保留完整视频录制与解码流程。
+- 运行日志使用纯白文本，可鼠标框选复制，也可点击“复制日志”一次性复制全部内容。
 
 ## 录像建议
 
@@ -298,4 +356,8 @@ py -3 scripts\win_decoder_hd.py repair_record.mp4 -o reconstructed_project --sta
 - 解码端会尝试红框透视校正、降采样再放大、CLAHE 对比度增强、锐化、开运算和自适应二值化，以降低手机拍屏的摩尔纹影响。
 - 解码端会优先尝试 `zxing-cpp`，再尝试 OpenCV QRCodeDetector，最后使用 pyzbar/zbar；哪个引擎能解就用哪个。
 - 解码端默认开启连续帧多数投票：同一分片重复播放时，会把连续多帧拉平并二值化，按像素投票重建更干净的二维码。可用 `--vote-window 7 --vote-min-frames 4` 调大窗口，或 `--vote-window 1` 关闭。
-- 解码端可用 `--confirm-copies 2` 要求同一分片至少两次解出相同 payload CRC 才入库；如果两次不一致，就继续等下一帧，最终缺失的分片走续传补片。
+- 解码端可用 `--confirm-copies 2` 要求同一分片至少两次解出相同 payload CRC 才入库；如果两次不一致，就继续等下一帧。仍然缺片时，增加发送端 `--passes` 或 `--repeat` 后重新生成同一个 4QR 视频。
+
+## License
+
+MIT License. See [LICENSE](LICENSE).

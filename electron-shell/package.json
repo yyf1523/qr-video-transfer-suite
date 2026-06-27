@@ -1,0 +1,64 @@
+{
+  "name": "qr-video-transfer-suite",
+  "version": "2026.6.27",
+  "description": "Electron shell for QR video transfer tools.",
+  "main": "src/main.cjs",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win --x64",
+    "dist:linux": "electron-builder --linux AppImage --x64",
+    "dist": "electron-builder --win --linux AppImage --x64"
+  },
+  "devDependencies": {
+    "electron": "42.5.0",
+    "electron-builder": "26.15.5"
+  },
+  "build": {
+    "appId": "com.offline.qrvideo.transfer",
+    "productName": "QRVideoTransferSuite",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "asar": true,
+    "icon": "assets/app-icon.png",
+    "directories": {
+      "output": "../build/electron-dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/app-icon.ico",
+      "target": [
+        "dir",
+        "portable"
+      ],
+      "extraResources": [
+        {
+          "from": "../build/electron-tools/win32-x64",
+          "to": "tools/win32-x64",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "icon": "assets/app-icon-256.png",
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility",
+      "extraResources": [
+        {
+          "from": "../build/electron-tools/linux-x64",
+          "to": "tools/linux-x64",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
+    }
+  }
+}

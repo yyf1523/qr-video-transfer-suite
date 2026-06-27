@@ -28,6 +28,30 @@ ENCODER_SCRIPT = ROOT_DIR / "scripts" / "linux_encoder_hd.py"
 
 
 PROFILES = {
+    "screen_1080p_horizontal_4qr_fast_fec": {
+        "label": "本机 1080p 横向 4QR 30FPS FEC",
+        "qr_version": "40",
+        "box_size": "2",
+        "chunk_size": "1200",
+        "payload_mode": "binary",
+        "qr_error_correction": "H",
+        "grid_cols": "4",
+        "grid_rows": "1",
+        "grid_gap": "10",
+        "canvas_width": "1920",
+        "canvas_height": "1080",
+        "fps": "30",
+        "repeat": "2",
+        "passes": "1",
+        "fec_group_size": "100",
+        "fec_parity_chunks": "12",
+        "label_height": "64",
+        "label_scale": "0.45",
+        "meta_qr_size": "48",
+        "meta_qr_version": "6",
+        "color_border": "8",
+        "outer_white": "4",
+    },
     "screen_1080p_horizontal_4qr": {
         "label": "本机 1080p 横向 4QR",
         "qr_version": "40",
@@ -43,6 +67,8 @@ PROFILES = {
         "fps": "60",
         "repeat": "5",
         "passes": "1",
+        "fec_group_size": "100",
+        "fec_parity_chunks": "0",
         "label_height": "64",
         "label_scale": "0.45",
         "meta_qr_size": "48",
@@ -65,6 +91,8 @@ PROFILES = {
         "fps": "60",
         "repeat": "5",
         "passes": "1",
+        "fec_group_size": "100",
+        "fec_parity_chunks": "0",
         "label_height": "84",
         "label_scale": "0.55",
         "meta_qr_size": "64",
@@ -87,6 +115,8 @@ PROFILES = {
         "fps": "60",
         "repeat": "5",
         "passes": "1",
+        "fec_group_size": "100",
+        "fec_parity_chunks": "0",
         "label_height": "112",
         "label_scale": "0.8",
         "meta_qr_size": "96",
@@ -109,6 +139,8 @@ PROFILES = {
         "fps": "10",
         "repeat": "2",
         "passes": "1",
+        "fec_group_size": "100",
+        "fec_parity_chunks": "0",
         "label_height": "112",
         "label_scale": "0.8",
         "meta_qr_size": "96",
@@ -131,6 +163,8 @@ PROFILES = {
         "fps": "10",
         "repeat": "2",
         "passes": "1",
+        "fec_group_size": "100",
+        "fec_parity_chunks": "0",
         "label_height": "128",
         "label_scale": "1.0",
         "meta_qr_size": "112",
@@ -153,6 +187,8 @@ PROFILES = {
         "fps": "6",
         "repeat": "3",
         "passes": "2",
+        "fec_group_size": "100",
+        "fec_parity_chunks": "0",
         "label_height": "128",
         "label_scale": "1.0",
         "meta_qr_size": "112",
@@ -185,15 +221,12 @@ class EncoderGui:
 
         self.log_queue: queue.Queue[str | None] = queue.Queue()
         self.process: subprocess.Popen[str] | None = None
-        self.lib_dirs: list[str] = []
-
         self.source_var = tk.StringVar()
         self.output_var = tk.StringVar(value=str((Path.cwd() / "qr-video-out" / "hd_secure_stream.mp4").resolve()))
         self.manifest_var = tk.StringVar()
         self.manifest_json_var = tk.StringVar()
-        self.resume_var = tk.StringVar()
         self.preview_var = tk.StringVar()
-        self.profile_var = tk.StringVar(value=PROFILES["screen_60fps"]["label"])
+        self.profile_var = tk.StringVar(value=PROFILES["screen_1080p_horizontal_4qr_fast_fec"]["label"])
 
         self.option_vars = {
             "qr_version": tk.StringVar(),
@@ -209,6 +242,8 @@ class EncoderGui:
             "fps": tk.StringVar(),
             "repeat": tk.StringVar(),
             "passes": tk.StringVar(),
+            "fec_group_size": tk.StringVar(),
+            "fec_parity_chunks": tk.StringVar(),
             "label_height": tk.StringVar(),
             "label_scale": tk.StringVar(),
             "meta_qr_size": tk.StringVar(),
@@ -225,7 +260,7 @@ class EncoderGui:
         main = ttk.Frame(self.root, padding=12)
         main.pack(fill=tk.BOTH, expand=True)
         main.columnconfigure(0, weight=1)
-        main.rowconfigure(4, weight=1)
+        main.rowconfigure(3, weight=1)
 
         file_frame = ttk.LabelFrame(main, text="输入 / 输出", padding=10)
         file_frame.grid(row=0, column=0, sticky="ew")
@@ -235,19 +270,9 @@ class EncoderGui:
         self._path_row(file_frame, 1, "输出视频", self.output_var, self.browse_output)
         self._path_row(file_frame, 2, "Manifest MD", self.manifest_var, self.browse_manifest)
         self._path_row(file_frame, 3, "Manifest JSON", self.manifest_json_var, self.browse_manifest_json)
-        self._path_row(file_frame, 4, "补片 JSON", self.resume_var, self.browse_resume)
-
-        lib_frame = ttk.LabelFrame(main, text="Jar 目录", padding=10)
-        lib_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        lib_frame.columnconfigure(0, weight=1)
-        self.lib_list = tk.Listbox(lib_frame, height=4)
-        self.lib_list.grid(row=0, column=0, rowspan=3, sticky="ew")
-        ttk.Button(lib_frame, text="添加目录", command=self.add_lib_dir).grid(row=0, column=1, sticky="ew", padx=(8, 0))
-        ttk.Button(lib_frame, text="移除选中", command=self.remove_lib_dir).grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=4)
-        ttk.Button(lib_frame, text="清空", command=self.clear_lib_dirs).grid(row=2, column=1, sticky="ew", padx=(8, 0))
 
         profile_frame = ttk.LabelFrame(main, text="视频参数", padding=10)
-        profile_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        profile_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
         for col in range(8):
             profile_frame.columnconfigure(col, weight=1)
 
@@ -278,6 +303,8 @@ class EncoderGui:
             ("fps", "FPS"),
             ("repeat", "单片重复"),
             ("passes", "整体轮次"),
+            ("fec_group_size", "FEC组大小"),
+            ("fec_parity_chunks", "FEC校验片"),
             ("label_height", "顶部高度"),
             ("label_scale", "数字字号"),
             ("meta_qr_size", "小QR尺寸"),
@@ -294,13 +321,13 @@ class EncoderGui:
             )
 
         extra_frame = ttk.Frame(main)
-        extra_frame.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        extra_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
         extra_frame.columnconfigure(1, weight=1)
         ttk.Label(extra_frame, text="仅预览前 N 片").grid(row=0, column=0, sticky="w")
         ttk.Entry(extra_frame, textvariable=self.preview_var, width=12).grid(row=0, column=1, sticky="w", padx=(8, 0))
 
         log_frame = ttk.LabelFrame(main, text="运行日志", padding=10)
-        log_frame.grid(row=4, column=0, sticky="nsew", pady=(10, 0))
+        log_frame.grid(row=3, column=0, sticky="nsew", pady=(10, 0))
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
         self.log_text = tk.Text(log_frame, height=14, wrap=tk.WORD)
@@ -310,7 +337,7 @@ class EncoderGui:
         self.log_text.configure(yscrollcommand=scrollbar.set)
 
         buttons = ttk.Frame(main)
-        buttons.grid(row=5, column=0, sticky="ew", pady=(10, 0))
+        buttons.grid(row=4, column=0, sticky="ew", pady=(10, 0))
         buttons.columnconfigure(0, weight=1)
         self.run_button = ttk.Button(buttons, text="开始生成视频", command=self.start_encode)
         self.run_button.grid(row=0, column=1, padx=(8, 0))
@@ -355,26 +382,6 @@ class EncoderGui:
         if path:
             self.manifest_json_var.set(path)
 
-    def browse_resume(self) -> None:
-        path = filedialog.askopenfilename(title="选择 missing_chunks.json", filetypes=[("JSON", "*.json"), ("All files", "*.*")])
-        if path:
-            self.resume_var.set(path)
-
-    def add_lib_dir(self) -> None:
-        path = filedialog.askdirectory(title="选择 Jar 目录")
-        if path and path not in self.lib_dirs:
-            self.lib_dirs.append(path)
-            self.lib_list.insert(tk.END, path)
-
-    def remove_lib_dir(self) -> None:
-        for index in reversed(self.lib_list.curselection()):
-            self.lib_list.delete(index)
-            del self.lib_dirs[index]
-
-    def clear_lib_dirs(self) -> None:
-        self.lib_dirs.clear()
-        self.lib_list.delete(0, tk.END)
-
     def build_command(self) -> list[str]:
         source = self.source_var.get().strip()
         output = self.output_var.get().strip()
@@ -384,8 +391,6 @@ class EncoderGui:
             raise ValueError("请选择输出视频路径")
 
         command = [sys.executable, str(ENCODER_SCRIPT), "--source", source]
-        for lib_dir in self.lib_dirs:
-            command.extend(["--lib-dir", lib_dir])
         command.extend(["-o", output])
 
         manifest = self.manifest_var.get().strip()
@@ -394,9 +399,6 @@ class EncoderGui:
             command.extend(["--manifest", manifest])
         if manifest_json:
             command.extend(["--manifest-json", manifest_json])
-        resume = self.resume_var.get().strip()
-        if resume:
-            command.extend(["--resume-missing", resume])
         preview = self.preview_var.get().strip()
         if preview:
             command.extend(["--preview-chunks", preview])
@@ -415,6 +417,8 @@ class EncoderGui:
             "fps": "--fps",
             "repeat": "--repeat",
             "passes": "--passes",
+            "fec_group_size": "--fec-group-size",
+            "fec_parity_chunks": "--fec-parity-chunks",
             "label_height": "--label-height",
             "label_scale": "--label-scale",
             "meta_qr_size": "--meta-qr-size",

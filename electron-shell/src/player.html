@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>二维码视频播放器</title>
+    <link rel="stylesheet" href="./player.css" />
+  </head>
+  <body>
+    <main class="player-shell" id="playerShell">
+      <video id="video" playsinline preload="auto"></video>
+
+      <header class="player-header player-chrome">
+        <div class="media-title">
+          <span class="status-dot" id="statusDot" aria-hidden="true"></span>
+          <strong id="mediaTitle">二维码视频</strong>
+          <span id="playbackStatus">正在加载</span>
+        </div>
+        <button class="chrome-button close-button" id="closePlayer" type="button">关闭</button>
+      </header>
+
+      <section class="player-error" id="playerError" role="alert" hidden>
+        <strong>无法播放该视频</strong>
+        <span id="playerErrorDetail">请检查视频文件和编码格式。</span>
+      </section>
+
+      <footer class="player-controls player-chrome" aria-label="播放控制">
+        <button class="control-button primary-control" id="togglePlayback" type="button">播放</button>
+        <span class="time-label" id="currentTime">00:00</span>
+        <input id="seekBar" type="range" min="0" max="1000" value="0" aria-label="播放进度" />
+        <span class="time-label" id="duration">00:00</span>
+        <button class="control-button" id="toggleMute" type="button">静音</button>
+        <button class="control-button" id="toggleLoop" type="button" aria-pressed="true">循环开</button>
+        <button class="control-button" id="toggleFullscreen" type="button">全屏</button>
+      </footer>
+    </main>
+    <script src="./player.js"></script>
+  </body>
+</html>

@@ -62,12 +62,6 @@ fi
 SOURCE_ARCHIVE="${ARCHIVES[0]}"
 INPUTS=(--source "$SOURCE_ARCHIVE")
 
-for dir_name in lib libs dependency dependencies deps jars; do
-  if [ -d "$WORK_DIR/$dir_name" ] && find "$WORK_DIR/$dir_name" -type f -iname '*.jar' | grep -q .; then
-    INPUTS+=(--lib-dir "$WORK_DIR/$dir_name")
-  fi
-done
-
 NPM_BUNDLE="$OUT_DIR/npm-packages.tgz"
 mapfile -t NPM_TARBALLS < <(
   find "$WORK_DIR" -maxdepth 4 -type f \( -iname '*.tgz' -o -iname '*.npm' \) \
@@ -85,10 +79,6 @@ elif [ "${INCLUDE_NODE_MODULES:-1}" = "1" ] && [ -d "$WORK_DIR/node_modules" ]; 
     --exclude='node_modules/.pnpm-store' \
     -czf "$NPM_BUNDLE" node_modules
   INPUTS+=("$NPM_BUNDLE")
-fi
-
-if [ -n "${RESUME_MISSING:-}" ]; then
-  INPUTS+=(--resume-missing "$RESUME_MISSING")
 fi
 
 OUTPUT_VIDEO="${OUTPUT_VIDEO:-$OUT_DIR/hd_secure_stream.mp4}"
