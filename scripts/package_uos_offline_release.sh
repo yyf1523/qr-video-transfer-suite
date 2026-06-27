@@ -56,6 +56,13 @@ set -eu
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 export ELECTRON_DISABLE_GPU=1
 export LIBGL_ALWAYS_SOFTWARE=1
+export LIBVA_MESSAGING_LEVEL="${LIBVA_MESSAGING_LEVEL:-0}"
+export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-dummy}"
+export GST_VAAPI_ALL_DRIVERS="${GST_VAAPI_ALL_DRIVERS:-0}"
+export QR_SUITE_LOG_DIR="${QR_SUITE_LOG_DIR:-$DIR/logs}"
+mkdir -p "$QR_SUITE_LOG_DIR" 2>/dev/null || export QR_SUITE_LOG_DIR="${TMPDIR:-/tmp}/qr-video-transfer-logs"
+mkdir -p "$QR_SUITE_LOG_DIR" 2>/dev/null || true
+launcher_log="$QR_SUITE_LOG_DIR/launcher-$(date +%Y%m%d-%H%M%S).log"
 export XDG_DATA_DIRS="$DIR/runtime-data/share:/usr/local/share:/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
 export GTK_DATA_PREFIX="$DIR/runtime-data"
 export GTK_EXE_PREFIX="$DIR/runtime-data"
@@ -100,10 +107,13 @@ exec "$appimage_path" \
   --disable-gpu \
   --disable-gpu-compositing \
   --disable-gpu-rasterization \
+  --disable-accelerated-video-decode \
+  --disable-accelerated-video-encode \
   --disable-dev-shm-usage \
   --ozone-platform=x11 \
+  --disable-features=UseOzonePlatform,Vulkan,VaapiVideoDecoder,VaapiVideoEncoder,VaapiIgnoreDriverChecks \
   --log-level=3 \
-  "$@"
+  "$@" >> "$launcher_log" 2>&1
 SH
 
 cat > "$stage_dir/Start-UOS-unpacked.sh" <<'SH'
@@ -112,6 +122,13 @@ set -eu
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 export ELECTRON_DISABLE_GPU=1
 export LIBGL_ALWAYS_SOFTWARE=1
+export LIBVA_MESSAGING_LEVEL="${LIBVA_MESSAGING_LEVEL:-0}"
+export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-dummy}"
+export GST_VAAPI_ALL_DRIVERS="${GST_VAAPI_ALL_DRIVERS:-0}"
+export QR_SUITE_LOG_DIR="${QR_SUITE_LOG_DIR:-$DIR/logs}"
+mkdir -p "$QR_SUITE_LOG_DIR" 2>/dev/null || export QR_SUITE_LOG_DIR="${TMPDIR:-/tmp}/qr-video-transfer-logs"
+mkdir -p "$QR_SUITE_LOG_DIR" 2>/dev/null || true
+launcher_log="$QR_SUITE_LOG_DIR/launcher-$(date +%Y%m%d-%H%M%S).log"
 export XDG_DATA_DIRS="$DIR/runtime-data/share:/usr/local/share:/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
 export GTK_DATA_PREFIX="$DIR/runtime-data"
 export GTK_EXE_PREFIX="$DIR/runtime-data"
@@ -147,10 +164,13 @@ exec "$DIR/linux-unpacked/qr-video-transfer-suite" \
   --disable-gpu \
   --disable-gpu-compositing \
   --disable-gpu-rasterization \
+  --disable-accelerated-video-decode \
+  --disable-accelerated-video-encode \
   --disable-dev-shm-usage \
   --ozone-platform=x11 \
+  --disable-features=UseOzonePlatform,Vulkan,VaapiVideoDecoder,VaapiVideoEncoder,VaapiIgnoreDriverChecks \
   --log-level=3 \
-  "$@"
+  "$@" >> "$launcher_log" 2>&1
 SH
 chmod +x "$stage_dir/Start-UOS-AppImage.sh" "$stage_dir/Start-UOS-unpacked.sh"
 
@@ -174,11 +194,18 @@ Fallback launch when AppImage/FUSE is blocked:
   ./Start-UOS-unpacked.sh
 
 Both launchers force software rendering for cloud desktops:
-ELECTRON_DISABLE_GPU=1, LIBGL_ALWAYS_SOFTWARE=1, --disable-gpu, --ozone-platform=x11.
+ELECTRON_DISABLE_GPU=1, LIBGL_ALWAYS_SOFTWARE=1, LIBVA_DRIVER_NAME=dummy,
+GST_VAAPI_ALL_DRIVERS=0, --disable-gpu, --disable-accelerated-video-decode,
+--disable-accelerated-video-encode, --ozone-platform=x11.
 
 The launchers also restore GTK icon/MIME lookup paths and a bundled
 gdk-pixbuf loader cache. Use the launchers instead of starting the binary
 directly to avoid pixbuf/icon crashes on minimal cloud desktops.
+
+Diagnostics:
+- Launcher stdout/stderr: logs/launcher-*.log
+- Application events and renderer crashes: logs/qr-video-transfer-*.log
+- Click "打开日志目录" in the app to open this folder.
 TXT
 
 mkdir -p "$release_root"

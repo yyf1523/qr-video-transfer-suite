@@ -56,6 +56,19 @@ cat > "$appdir/AppRun" <<'APPRUN'
 APPDIR="$(dirname "$(readlink -f "$0")")"
 export ELECTRON_DISABLE_GPU=1
 export LIBGL_ALWAYS_SOFTWARE=1
+export LIBVA_MESSAGING_LEVEL="${LIBVA_MESSAGING_LEVEL:-0}"
+export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-dummy}"
+export GST_VAAPI_ALL_DRIVERS="${GST_VAAPI_ALL_DRIVERS:-0}"
+if [ -z "${QR_SUITE_LOG_DIR:-}" ]; then
+  if [ -n "${APPIMAGE:-}" ]; then
+    export QR_SUITE_LOG_DIR="$(dirname "$APPIMAGE")/logs"
+  else
+    export QR_SUITE_LOG_DIR="$APPDIR/logs"
+  fi
+fi
+mkdir -p "$QR_SUITE_LOG_DIR" 2>/dev/null || export QR_SUITE_LOG_DIR="${TMPDIR:-/tmp}/qr-video-transfer-logs"
+mkdir -p "$QR_SUITE_LOG_DIR" 2>/dev/null || true
+launcher_log="$QR_SUITE_LOG_DIR/launcher-$(date +%Y%m%d-%H%M%S).log"
 export XDG_DATA_DIRS="$APPDIR/usr/share:/usr/local/share:/usr/share${XDG_DATA_DIRS:+:$XDG_DATA_DIRS}"
 export GTK_DATA_PREFIX="$APPDIR/usr"
 export GTK_EXE_PREFIX="$APPDIR/usr"
@@ -87,10 +100,13 @@ exec "$APPDIR/usr/bin/QRVideoTransferSuite/qr-video-transfer-suite" \
   --disable-gpu \
   --disable-gpu-compositing \
   --disable-gpu-rasterization \
+  --disable-accelerated-video-decode \
+  --disable-accelerated-video-encode \
   --disable-dev-shm-usage \
   --ozone-platform=x11 \
+  --disable-features=UseOzonePlatform,Vulkan,VaapiVideoDecoder,VaapiVideoEncoder,VaapiIgnoreDriverChecks \
   --log-level=3 \
-  "$@"
+  "$@" >> "$launcher_log" 2>&1
 APPRUN
 chmod +x "$appdir/AppRun"
 

@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld("qrSuite", {
   listRecordingMonitors: () => ipcRenderer.invoke("recording:listMonitors"),
   startRecording: (payload) => ipcRenderer.invoke("recording:start", payload),
   stopRecording: (runId) => ipcRenderer.invoke("recording:stop", runId),
+  openLogsDirectory: () => ipcRenderer.invoke("logs:openDirectory"),
+  writeAppLog: (payload) => ipcRenderer.invoke("logs:write", payload),
   copyText: (text) => ipcRenderer.invoke("clipboard:writeText", text),
   encodeTextQr: (payload) => ipcRenderer.invoke("text:encode", payload),
   decodeTextQr: (payload) => ipcRenderer.invoke("text:decode", payload),

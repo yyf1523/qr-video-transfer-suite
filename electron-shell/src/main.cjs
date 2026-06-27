@@ -3,7 +3,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
-const { pathToFileURL } = require("url");
+const { fileURLToPath, pathToFileURL } = require("url");
 
 app.commandLine.appendSwitch("no-sandbox");
 app.commandLine.appendSwitch("disable-setuid-sandbox");
@@ -11,14 +11,19 @@ app.commandLine.appendSwitch("disable-gpu-sandbox");
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
 if (process.platform === "linux") {
+  process.env.LIBVA_MESSAGING_LEVEL = process.env.LIBVA_MESSAGING_LEVEL || "0";
+  process.env.LIBVA_DRIVER_NAME = process.env.LIBVA_DRIVER_NAME || "dummy";
+  process.env.GST_VAAPI_ALL_DRIVERS = process.env.GST_VAAPI_ALL_DRIVERS || "0";
   app.disableHardwareAcceleration();
   app.commandLine.appendSwitch("disable-gpu");
   app.commandLine.appendSwitch("disable-gpu-compositing");
   app.commandLine.appendSwitch("disable-gpu-rasterization");
+  app.commandLine.appendSwitch("disable-accelerated-video-decode");
+  app.commandLine.appendSwitch("disable-accelerated-video-encode");
   app.commandLine.appendSwitch("disable-dev-shm-usage");
   app.commandLine.appendSwitch("ozone-platform", "x11");
   app.commandLine.appendSwitch("use-gl", "swiftshader");
-  app.commandLine.appendSwitch("disable-features", "UseOzonePlatform,Vulkan");
+  app.commandLine.appendSwitch("disable-features", "UseOzonePlatform,Vulkan,VaapiVideoDecoder,VaapiVideoEncoder,VaapiIgnoreDriverChecks");
 }
 
 const isPackaged = app.isPackaged;
@@ -27,6 +32,87 @@ const repoRoot = isPackaged ? null : path.resolve(shellRoot, "..");
 const toolsRoot = isPackaged ? path.join(process.resourcesPath, "tools") : path.resolve(repoRoot, "build", "electron-tools");
 const activeRecordings = new Map();
 const playerWindows = new Set();
+let logFilePath = null;
+
+function timestampForFile(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+function defaultLogDir() {
+  if (process.env.QR_SUITE_LOG_DIR) {
+    return process.env.QR_SUITE_LOG_DIR;
+  }
+  if (process.platform === "linux" && process.env.APPIMAGE) {
+    return path.join(path.dirname(process.env.APPIMAGE), "logs");
+  }
+  if (isPackaged) {
+    return path.join(path.dirname(process.execPath), "logs");
+  }
+  return path.join(repoRoot || process.cwd(), "logs");
+}
+
+function initLogging() {
+  const logDirs = [defaultLogDir(), path.join(os.tmpdir(), "qr-video-transfer-logs")];
+  for (const logDir of logDirs) {
+    try {
+      fs.mkdirSync(logDir, { recursive: true });
+      logFilePath = path.join(logDir, `qr-video-transfer-${timestampForFile()}.log`);
+      break;
+    } catch (_error) {
+      logFilePath = null;
+    }
+  }
+  writeLog("info", "Application logging started", {
+    logFilePath,
+    platform: process.platform,
+    packaged: isPackaged,
+    electron: process.versions.electron,
+    argv: process.argv
+  });
+}
+
+function serializeError(error) {
+  if (!error) return null;
+  return {
+    name: error.name,
+    message: error.message || String(error),
+    stack: error.stack
+  };
+}
+
+function writeLog(level, message, data = null) {
+  try {
+    if (!logFilePath) return;
+    const entry = {
+      time: new Date().toISOString(),
+      level,
+      message,
+      data
+    };
+    fs.appendFileSync(logFilePath, `${JSON.stringify(entry)}\n`, "utf8");
+  } catch (_error) {
+    // Logging must never take the app down.
+  }
+}
+
+function logsDirectory() {
+  return logFilePath ? path.dirname(logFilePath) : defaultLogDir();
+}
+
+initLogging();
+
+process.on("uncaughtException", (error) => {
+  writeLog("fatal", "uncaughtException", serializeError(error));
+});
+
+process.on("unhandledRejection", (reason) => {
+  writeLog("fatal", "unhandledRejection", serializeError(reason) || { reason: String(reason) });
+});
+
+app.on("child-process-gone", (_event, details) => {
+  writeLog("fatal", "Child process gone", details);
+});
 
 const tools = {
   videoEncode: {
@@ -97,9 +183,136 @@ function normalizeArgs(args) {
   return args.filter((item) => item !== undefined && item !== null && String(item) !== "").map((item) => String(item));
 }
 
+function commandExists(command) {
+  const paths = String(process.env.PATH || "").split(path.delimiter);
+  return paths.some((dir) => fs.existsSync(path.join(dir, command)));
+}
+
+function runPickerCommand(command, args) {
+  writeLog("info", "Starting external picker", { command, args });
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: workingDirectory(),
+      windowsHide: true,
+      env: {
+        ...process.env,
+        LIBVA_MESSAGING_LEVEL: process.env.LIBVA_MESSAGING_LEVEL || "0",
+        LIBVA_DRIVER_NAME: process.env.LIBVA_DRIVER_NAME || "dummy"
+      }
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (data) => {
+      stdout += data.toString("utf8");
+    });
+    child.stderr.on("data", (data) => {
+      stderr += data.toString("utf8");
+    });
+    child.on("error", (error) => {
+      writeLog("error", "External picker spawn error", { command, error: serializeError(error) });
+      reject(error);
+    });
+    child.on("close", (code) => {
+      writeLog("info", "External picker exited", { command, code, stderr: stderr.trim() });
+      if (code === 0) {
+        resolve(normalizePickerPath(stdout.split(/\r?\n/).find((line) => line.trim())?.trim() || null));
+      } else if (code === 1 || code === 2) {
+        resolve(null);
+      } else {
+        reject(new Error(stderr.trim() || `${command} exited with code ${code}`));
+      }
+    });
+  });
+}
+
+function normalizePickerPath(filePath) {
+  if (!filePath) {
+    return null;
+  }
+  if (/^file:\/\//i.test(filePath)) {
+    try {
+      return fileURLToPath(filePath);
+    } catch (error) {
+      writeLog("warn", "Failed to decode picker file URL", { filePath, error: serializeError(error) });
+    }
+  }
+  return filePath;
+}
+
+function zenityFilter(filters = []) {
+  const archiveExts = new Set(["zip", "7z", "tar", "gz", "tgz"]);
+  const videoExts = new Set(["mp4", "avi", "mov", "mkv", "webm"]);
+  const pngExts = new Set(["png"]);
+  const selected = [];
+  for (const filter of filters) {
+    for (const ext of filter.extensions || []) {
+      selected.push(String(ext).toLowerCase());
+    }
+  }
+  const extSet = new Set(selected);
+  if ([...archiveExts].some((ext) => extSet.has(ext))) {
+    return ["--file-filter=Archives | *.zip *.7z *.tar *.tar.gz *.tgz"];
+  }
+  if ([...videoExts].some((ext) => extSet.has(ext))) {
+    return ["--file-filter=Videos | *.mp4 *.avi *.mov *.mkv *.webm"];
+  }
+  if ([...pngExts].some((ext) => extSet.has(ext))) {
+    return ["--file-filter=PNG | *.png"];
+  }
+  return [];
+}
+
+function kdialogFilter(filters = []) {
+  const selected = new Set(filters.flatMap((filter) => filter.extensions || []).map((ext) => String(ext).toLowerCase()));
+  if (["zip", "7z", "tar", "gz", "tgz"].some((ext) => selected.has(ext))) {
+    return "Archives (*.zip *.7z *.tar *.tar.gz *.tgz)";
+  }
+  if (["mp4", "avi", "mov", "mkv", "webm"].some((ext) => selected.has(ext))) {
+    return "Videos (*.mp4 *.avi *.mov *.mkv *.webm)";
+  }
+  if (selected.has("png")) {
+    return "PNG (*.png)";
+  }
+  return "All files (*)";
+}
+
+async function linuxExternalOpenFile(options = {}) {
+  const title = options.title || "选择文件";
+  const filters = options.filters || [{ name: "All files", extensions: ["*"] }];
+  if (commandExists("zenity")) {
+    return runPickerCommand("zenity", ["--file-selection", `--title=${title}`, ...zenityFilter(filters)]);
+  }
+  if (commandExists("kdialog")) {
+    return runPickerCommand("kdialog", ["--getopenfilename", workingDirectory(), kdialogFilter(filters)]);
+  }
+  throw new Error("UOS 未找到 zenity/kdialog。请先手动把文件完整路径粘贴到输入框；日志目录里已记录该情况。");
+}
+
+async function linuxExternalOpenDirectory() {
+  if (commandExists("zenity")) {
+    return runPickerCommand("zenity", ["--file-selection", "--directory", "--title=选择目录"]);
+  }
+  if (commandExists("kdialog")) {
+    return runPickerCommand("kdialog", ["--getexistingdirectory", workingDirectory()]);
+  }
+  throw new Error("UOS 未找到 zenity/kdialog。请先手动把目录完整路径粘贴到输入框；日志目录里已记录该情况。");
+}
+
+async function linuxExternalSaveFile(options = {}) {
+  const defaultPath = resolveWorkingPath(options.defaultPath) || path.join(workingDirectory(), "output");
+  if (commandExists("zenity")) {
+    return runPickerCommand("zenity", ["--file-selection", "--save", "--confirm-overwrite", `--filename=${defaultPath}`, "--title=保存为"]);
+  }
+  if (commandExists("kdialog")) {
+    return runPickerCommand("kdialog", ["--getsavefilename", defaultPath, kdialogFilter(options.filters || [])]);
+  }
+  throw new Error("UOS 未找到 zenity/kdialog。请先手动把保存路径填到输入框；日志目录里已记录该情况。");
+}
+
 function spawnTool(toolId, args, sender, runId, lifecycle = {}) {
   const resolved = resolveCommand(toolId);
   const fullArgs = [...resolved.prefixArgs, ...normalizeArgs(args)];
+  writeLog("info", "Starting tool", { toolId, runId, command: resolved.command, args: fullArgs, mode: resolved.mode });
   const child = spawn(resolved.command, fullArgs, {
     cwd: repoRoot || app.getPath("documents"),
     windowsHide: true,
@@ -119,12 +332,17 @@ function spawnTool(toolId, args, sender, runId, lifecycle = {}) {
   };
 
   child.stdout.on("data", (data) => emit("stdout", data));
-  child.stderr.on("data", (data) => emit("stderr", data));
+  child.stderr.on("data", (data) => {
+    writeLog("warn", "Tool stderr", { toolId, runId, text: data.toString("utf8") });
+    emit("stderr", data);
+  });
   let errorMessage = null;
   child.on("error", (error) => {
     errorMessage = error.message;
+    writeLog("error", "Tool spawn error", { toolId, runId, error: serializeError(error) });
   });
   child.on("close", (code) => {
+    writeLog("info", "Tool closed", { toolId, runId, code, errorMessage });
     lifecycle.onClose?.(code, errorMessage);
     if (!sender.isDestroyed()) {
       sender.send("task:done", { runId, code: errorMessage ? 1 : code, error: errorMessage });
@@ -163,6 +381,7 @@ function requireExistingFile(filePath) {
 function runCapture(toolId, args) {
   const resolved = resolveCommand(toolId);
   const fullArgs = [...resolved.prefixArgs, ...normalizeArgs(args)];
+  writeLog("info", "Starting capture tool", { toolId, command: resolved.command, args: fullArgs, mode: resolved.mode });
   return new Promise((resolve, reject) => {
     const child = spawn(resolved.command, fullArgs, {
       cwd: repoRoot || app.getPath("documents"),
@@ -181,8 +400,12 @@ function runCapture(toolId, args) {
     child.stderr.on("data", (data) => {
       stderr += data.toString("utf8");
     });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      writeLog("error", "Capture tool spawn error", { toolId, error: serializeError(error) });
+      reject(error);
+    });
     child.on("close", (code) => {
+      writeLog("info", "Capture tool closed", { toolId, code, stderr: stderr.trim() });
       resolve({ code, stdout, stderr, command: resolved.command, args: fullArgs });
     });
   });
@@ -221,6 +444,20 @@ function createWindow() {
   }
   const win = new BrowserWindow(windowOptions);
   win.removeMenu();
+  win.webContents.on("render-process-gone", (_event, details) => {
+    writeLog("fatal", "Renderer process gone", details);
+  });
+  win.webContents.on("unresponsive", () => {
+    writeLog("error", "Main window became unresponsive");
+  });
+  win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    if (level >= 2) {
+      writeLog("renderer", "Console message", { level, message, line, sourceId });
+    }
+  });
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    writeLog("error", "Main window failed to load", { errorCode, errorDescription, validatedURL });
+  });
   win.loadFile(path.join(__dirname, "index.html"));
 }
 
@@ -289,27 +526,44 @@ ipcMain.handle("app:info", () => ({
   electron: process.versions.electron,
   platform: process.platform,
   packaged: isPackaged,
-  toolsRoot
+  toolsRoot,
+  logFile: logFilePath,
+  logDir: logsDirectory()
 }));
 
 ipcMain.handle("dialog:openFile", async (_event, options = {}) => {
+  writeLog("info", "Open file requested", options);
+  if (process.platform === "linux" && process.env.QR_SUITE_USE_NATIVE_DIALOG !== "1") {
+    return linuxExternalOpenFile(options);
+  }
   const result = await dialog.showOpenDialog({
     properties: ["openFile"],
     filters: options.filters || [{ name: "All files", extensions: ["*"] }]
   });
+  writeLog("info", "Native open file completed", { canceled: result.canceled, count: result.filePaths.length });
   return result.canceled ? null : result.filePaths[0];
 });
 
 ipcMain.handle("dialog:openDirectory", async () => {
+  writeLog("info", "Open directory requested");
+  if (process.platform === "linux" && process.env.QR_SUITE_USE_NATIVE_DIALOG !== "1") {
+    return linuxExternalOpenDirectory();
+  }
   const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
+  writeLog("info", "Native open directory completed", { canceled: result.canceled, count: result.filePaths.length });
   return result.canceled ? null : result.filePaths[0];
 });
 
 ipcMain.handle("dialog:saveFile", async (_event, options = {}) => {
+  writeLog("info", "Save file requested", options);
+  if (process.platform === "linux" && process.env.QR_SUITE_USE_NATIVE_DIALOG !== "1") {
+    return linuxExternalSaveFile(options);
+  }
   const result = await dialog.showSaveDialog({
     defaultPath: options.defaultPath,
     filters: options.filters || [{ name: "All files", extensions: ["*"] }]
   });
+  writeLog("info", "Native save file completed", { canceled: result.canceled, filePath: result.filePath });
   return result.canceled ? null : result.filePath;
 });
 
@@ -317,6 +571,21 @@ ipcMain.handle("window:control", handleWindowControl);
 ipcMain.handle("window:isFullScreen", (event) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   return Boolean(win?.isFullScreen());
+});
+
+ipcMain.handle("logs:openDirectory", async () => {
+  const dir = logsDirectory();
+  fs.mkdirSync(dir, { recursive: true });
+  const error = await shell.openPath(dir);
+  if (error) {
+    throw new Error(error);
+  }
+  return dir;
+});
+
+ipcMain.handle("logs:write", (_event, payload = {}) => {
+  writeLog(payload.level || "renderer", payload.message || "", payload.data || null);
+  return true;
 });
 
 ipcMain.handle("task:run", (event, payload) => {
@@ -443,7 +712,13 @@ ipcMain.handle("text:decode", async (_event, payload) => {
   return { ...result, text };
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  writeLog("info", "Electron app ready");
+  createWindow();
+}).catch((error) => {
+  writeLog("fatal", "Electron app failed during ready", serializeError(error));
+  throw error;
+});
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
@@ -458,6 +733,7 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", () => {
+  writeLog("info", "Application before-quit", { activeRecordings: activeRecordings.size });
   for (const recording of activeRecordings.values()) {
     try {
       fs.writeFileSync(recording.stopFile, "stop\n", "utf8");

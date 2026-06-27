@@ -25,6 +25,34 @@ function log(message) {
   logOutput.scrollTop = logOutput.scrollHeight;
 }
 
+function appLog(level, message, data = null) {
+  try {
+    const result = window.qrSuite.writeAppLog({ level, message, data });
+    if (result && typeof result.catch === "function") {
+      result.catch(() => {});
+    }
+  } catch (_error) {
+    // Main-process logging is best-effort from the renderer.
+  }
+}
+
+window.addEventListener("error", (event) => {
+  appLog("renderer-error", "window.error", {
+    message: event.message,
+    filename: event.filename,
+    lineno: event.lineno,
+    colno: event.colno,
+    stack: event.error?.stack
+  });
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  appLog("renderer-error", "unhandledrejection", {
+    reason: event.reason?.message || String(event.reason),
+    stack: event.reason?.stack
+  });
+});
+
 function splitArgs(raw) {
   const args = [];
   const pattern = /"([^"]*)"|'([^']*)'|[^\s]+/g;
@@ -218,24 +246,34 @@ function wirePickers() {
       const target = $(button.dataset.pick);
       const kind = button.dataset.kind;
       let value = null;
-      if (kind === "dir") {
-        value = await window.qrSuite.openDirectory();
-      } else if (kind === "archive") {
-        value = await window.qrSuite.openFile({
-          filters: [{ name: "压缩包", extensions: ["zip", "7z", "tar", "gz", "tgz"] }]
-        });
-      } else if (kind === "saveVideo") {
-        value = await window.qrSuite.saveFile({ defaultPath: target.value || "hd_secure_stream.mp4", filters: [{ name: "MP4", extensions: ["mp4"] }] });
-      } else if (kind === "saveRecording") {
-        value = await window.qrSuite.saveFile({ defaultPath: target.value || defaultRecordingPath(), filters: [{ name: "MP4", extensions: ["mp4"] }] });
-      } else if (kind === "savePng") {
-        value = await window.qrSuite.saveFile({ defaultPath: target.value || "text-qr.png", filters: [{ name: "PNG", extensions: ["png"] }] });
-      } else if (kind === "video") {
-        value = await window.qrSuite.openFile({ filters: [{ name: "视频", extensions: ["mp4", "avi", "mov", "mkv", "webm"] }] });
-      } else {
-        value = await window.qrSuite.openFile();
+      try {
+        log(`打开选择器：${button.textContent.trim() || kind || "文件"}`);
+        if (kind === "dir") {
+          value = await window.qrSuite.openDirectory();
+        } else if (kind === "archive") {
+          value = await window.qrSuite.openFile({
+            title: "选择源码压缩包",
+            filters: [{ name: "压缩包", extensions: ["zip", "7z", "tar", "gz", "tgz"] }]
+          });
+        } else if (kind === "saveVideo") {
+          value = await window.qrSuite.saveFile({ defaultPath: target.value || "hd_secure_stream.mp4", filters: [{ name: "MP4", extensions: ["mp4"] }] });
+        } else if (kind === "saveRecording") {
+          value = await window.qrSuite.saveFile({ defaultPath: target.value || defaultRecordingPath(), filters: [{ name: "MP4", extensions: ["mp4"] }] });
+        } else if (kind === "savePng") {
+          value = await window.qrSuite.saveFile({ defaultPath: target.value || "text-qr.png", filters: [{ name: "PNG", extensions: ["png"] }] });
+        } else if (kind === "video") {
+          value = await window.qrSuite.openFile({ title: "选择视频文件", filters: [{ name: "视频", extensions: ["mp4", "avi", "mov", "mkv", "webm"] }] });
+        } else {
+          value = await window.qrSuite.openFile();
+        }
+        if (value) {
+          target.value = value;
+          log(`已选择：${value}`);
+        }
+      } catch (error) {
+        log(`选择失败：${error.message}`);
+        appLog("renderer-error", "Picker failed", { kind, error: error.message });
       }
-      if (value) target.value = value;
     });
   }
 }
@@ -595,12 +633,23 @@ async function boot() {
       button.textContent = original;
     }, 1200);
   });
+  $("openLogs").addEventListener("click", async () => {
+    try {
+      const dir = await window.qrSuite.openLogsDirectory();
+      log(`已打开日志目录：${dir}`);
+    } catch (error) {
+      log(`打开日志目录失败：${error.message}`);
+    }
+  });
   $("clearLog").addEventListener("click", () => {
     logOutput.textContent = "等待操作...";
     resetProgress();
   });
   runtimeBadge.textContent = `${info.platform} / Electron ${info.electron}${info.packaged ? " / packaged" : " / dev"}`;
   log("Electron GUI 初始化完成。");
+  if (info.logFile) {
+    log(`日志文件：${info.logFile}`);
+  }
 }
 
 boot().catch((error) => log(`初始化失败：${error.message}`));
