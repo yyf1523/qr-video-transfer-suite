@@ -32,6 +32,7 @@ const repoRoot = isPackaged ? null : path.resolve(shellRoot, "..");
 const toolsRoot = isPackaged ? path.join(process.resourcesPath, "tools") : path.resolve(repoRoot, "build", "electron-tools");
 const activeRecordings = new Map();
 const playerWindows = new Set();
+const pickerWindows = new Set();
 let logFilePath = null;
 
 function timestampForFile(date = new Date()) {
@@ -276,6 +277,183 @@ function kdialogFilter(filters = []) {
   return "All files (*)";
 }
 
+function fileExtensionMatches(fileName, extensions = []) {
+  if (!extensions.length || extensions.includes("*")) {
+    return true;
+  }
+  const lowerName = fileName.toLowerCase();
+  return extensions.some((ext) => {
+    const lowerExt = String(ext).toLowerCase().replace(/^\./, "");
+    return lowerName.endsWith(`.${lowerExt}`);
+  });
+}
+
+function normalizeFilters(filters = []) {
+  if (!Array.isArray(filters) || filters.length === 0) {
+    return [{ name: "All files", extensions: ["*"] }];
+  }
+  return filters.map((filter) => ({
+    name: String(filter.name || "Files"),
+    extensions: Array.isArray(filter.extensions) ? filter.extensions.map((ext) => String(ext)) : ["*"]
+  }));
+}
+
+function defaultPickerDirectory(options = {}) {
+  const candidates = [];
+  const defaultPath = resolveWorkingPath(options.defaultPath);
+  if (defaultPath) {
+    candidates.push(fs.existsSync(defaultPath) && fs.statSync(defaultPath).isDirectory() ? defaultPath : path.dirname(defaultPath));
+  }
+  candidates.push(app.getPath("desktop"), app.getPath("documents"), os.homedir(), workingDirectory());
+  return candidates.find((candidate) => candidate && fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) || workingDirectory();
+}
+
+function safeDirectoryPath(inputPath) {
+  const resolved = resolveWorkingPath(inputPath) || defaultPickerDirectory();
+  if (fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()) {
+    return resolved;
+  }
+  return defaultPickerDirectory();
+}
+
+function listPickerDirectory(payload = {}) {
+  const cwd = safeDirectoryPath(payload.cwd);
+  const filters = normalizeFilters(payload.filters);
+  const extensions = filters.flatMap((filter) => filter.extensions);
+  const mode = payload.mode || "openFile";
+  const entries = [];
+  for (const entry of fs.readdirSync(cwd, { withFileTypes: true })) {
+    const fullPath = path.join(cwd, entry.name);
+    let stat = null;
+    try {
+      stat = fs.statSync(fullPath);
+    } catch (_error) {
+      continue;
+    }
+    const isDirectory = entry.isDirectory();
+    const selectable = mode === "openDirectory" ? isDirectory : !isDirectory && fileExtensionMatches(entry.name, extensions);
+    entries.push({
+      name: entry.name,
+      path: fullPath,
+      isDirectory,
+      selectable,
+      size: isDirectory ? null : stat.size,
+      mtime: stat.mtimeMs
+    });
+  }
+  entries.sort((left, right) => {
+    if (left.isDirectory !== right.isDirectory) return left.isDirectory ? -1 : 1;
+    return left.name.localeCompare(right.name, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
+  });
+  return {
+    cwd,
+    parent: path.dirname(cwd) === cwd ? null : path.dirname(cwd),
+    home: os.homedir(),
+    desktop: app.getPath("desktop"),
+    separator: path.sep,
+    entries
+  };
+}
+
+function showInternalFilePicker(mode, options = {}, parentWindow = null) {
+  const token = `picker-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const filters = normalizeFilters(options.filters);
+  const initialDirectory = defaultPickerDirectory(options);
+  const titleByMode = {
+    openFile: "选择文件",
+    openDirectory: "选择目录",
+    saveFile: "保存文件"
+  };
+  const picker = new BrowserWindow({
+    width: 820,
+    height: 560,
+    minWidth: 680,
+    minHeight: 460,
+    title: options.title || titleByMode[mode] || "选择路径",
+    parent: parentWindow || undefined,
+    modal: Boolean(parentWindow),
+    autoHideMenuBar: true,
+    backgroundColor: "#f7f7fb",
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false
+    }
+  });
+  pickerWindows.add(picker);
+
+  return new Promise((resolve) => {
+    const channels = {
+      list: `filePicker:list:${token}`,
+      choose: `filePicker:choose:${token}`,
+      cancel: `filePicker:cancel:${token}`
+    };
+    let settled = false;
+    const cleanup = () => {
+      ipcMain.removeHandler(channels.list);
+      ipcMain.removeHandler(channels.choose);
+      ipcMain.removeHandler(channels.cancel);
+      pickerWindows.delete(picker);
+    };
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (!picker.isDestroyed()) {
+        picker.close();
+      }
+      resolve(value);
+    };
+
+    ipcMain.handle(channels.list, (_event, payload = {}) => listPickerDirectory({ ...payload, filters, mode }));
+    ipcMain.handle(channels.choose, (_event, payload = {}) => {
+      const selectedPath = String(payload.path || "").trim();
+      if (!selectedPath) {
+        return false;
+      }
+      if (mode === "saveFile") {
+        finish(resolveWorkingPath(selectedPath) || selectedPath);
+        return true;
+      }
+      const resolved = resolveWorkingPath(selectedPath);
+      if (!resolved || !fs.existsSync(resolved)) {
+        throw new Error("路径不存在。");
+      }
+      const stat = fs.statSync(resolved);
+      if (mode === "openDirectory" && !stat.isDirectory()) {
+        throw new Error("请选择目录。");
+      }
+      if (mode === "openFile" && !stat.isFile()) {
+        throw new Error("请选择文件。");
+      }
+      if (mode === "openFile" && !fileExtensionMatches(path.basename(resolved), filters.flatMap((filter) => filter.extensions))) {
+        throw new Error("文件类型不匹配。");
+      }
+      finish(resolved);
+      return true;
+    });
+    ipcMain.handle(channels.cancel, () => {
+      finish(null);
+      return true;
+    });
+    picker.on("closed", () => {
+      finish(null);
+    });
+    picker.loadFile(path.join(__dirname, "picker.html"), {
+      query: {
+        token,
+        mode,
+        title: options.title || titleByMode[mode] || "选择路径",
+        cwd: initialDirectory,
+        defaultPath: options.defaultPath || "",
+        filters: JSON.stringify(filters)
+      }
+    });
+    writeLog("info", "Internal file picker opened", { token, mode, initialDirectory, filters });
+  });
+}
+
 async function linuxExternalOpenFile(options = {}) {
   const title = options.title || "选择文件";
   const filters = options.filters || [{ name: "All files", extensions: ["*"] }];
@@ -307,6 +485,14 @@ async function linuxExternalSaveFile(options = {}) {
     return runPickerCommand("kdialog", ["--getsavefilename", defaultPath, kdialogFilter(options.filters || [])]);
   }
   throw new Error("UOS 未找到 zenity/kdialog。请先手动把保存路径填到输入框；日志目录里已记录该情况。");
+}
+
+function shouldUseNativeDialog() {
+  return process.env.QR_SUITE_USE_NATIVE_DIALOG === "1";
+}
+
+function shouldUseExternalPicker() {
+  return process.env.QR_SUITE_USE_EXTERNAL_PICKER === "1";
 }
 
 function spawnTool(toolId, args, sender, runId, lifecycle = {}) {
@@ -533,8 +719,11 @@ ipcMain.handle("app:info", () => ({
 
 ipcMain.handle("dialog:openFile", async (_event, options = {}) => {
   writeLog("info", "Open file requested", options);
-  if (process.platform === "linux" && process.env.QR_SUITE_USE_NATIVE_DIALOG !== "1") {
+  if (process.platform === "linux" && shouldUseExternalPicker()) {
     return linuxExternalOpenFile(options);
+  }
+  if (process.platform === "linux" && !shouldUseNativeDialog()) {
+    return showInternalFilePicker("openFile", options, BrowserWindow.fromWebContents(_event.sender));
   }
   const result = await dialog.showOpenDialog({
     properties: ["openFile"],
@@ -546,8 +735,11 @@ ipcMain.handle("dialog:openFile", async (_event, options = {}) => {
 
 ipcMain.handle("dialog:openDirectory", async () => {
   writeLog("info", "Open directory requested");
-  if (process.platform === "linux" && process.env.QR_SUITE_USE_NATIVE_DIALOG !== "1") {
+  if (process.platform === "linux" && shouldUseExternalPicker()) {
     return linuxExternalOpenDirectory();
+  }
+  if (process.platform === "linux" && !shouldUseNativeDialog()) {
+    return showInternalFilePicker("openDirectory", { title: "选择目录" });
   }
   const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
   writeLog("info", "Native open directory completed", { canceled: result.canceled, count: result.filePaths.length });
@@ -556,8 +748,11 @@ ipcMain.handle("dialog:openDirectory", async () => {
 
 ipcMain.handle("dialog:saveFile", async (_event, options = {}) => {
   writeLog("info", "Save file requested", options);
-  if (process.platform === "linux" && process.env.QR_SUITE_USE_NATIVE_DIALOG !== "1") {
+  if (process.platform === "linux" && shouldUseExternalPicker()) {
     return linuxExternalSaveFile(options);
+  }
+  if (process.platform === "linux" && !shouldUseNativeDialog()) {
+    return showInternalFilePicker("saveFile", options, BrowserWindow.fromWebContents(_event.sender));
   }
   const result = await dialog.showSaveDialog({
     defaultPath: options.defaultPath,

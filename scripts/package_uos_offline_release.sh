@@ -202,6 +202,10 @@ The launchers also restore GTK icon/MIME lookup paths and a bundled
 gdk-pixbuf loader cache. Use the launchers instead of starting the binary
 directly to avoid pixbuf/icon crashes on minimal cloud desktops.
 
+The Linux GUI uses a built-in file picker by default, so zenity/kdialog is
+not required. To test the native system dialog explicitly, launch with
+QR_SUITE_USE_NATIVE_DIALOG=1.
+
 Diagnostics:
 - Launcher stdout/stderr: logs/launcher-*.log
 - Application events and renderer crashes: logs/qr-video-transfer-*.log

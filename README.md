@@ -36,6 +36,7 @@ UOS/云桌面入口会强制软件渲染并关闭 VAAPI/硬件视频加速探测
 - `qr-video-transfer-*.log`：主进程、渲染进程、文件选择器、CLI 子进程和崩溃事件。
 
 界面日志区有“打开日志目录”按钮。若选择压缩包或播放视频后闪退，优先查看这两个日志文件；如果解压目录不可写，日志会退到系统临时目录 `qr-video-transfer-logs/`。
+UOS/Linux 默认使用应用内置文件选择器，不依赖系统安装 `zenity` 或 `kdialog`。如需临时回到系统原生对话框，可设置 `QR_SUITE_USE_NATIVE_DIALOG=1` 后再启动。
 
 ## 离线依赖准备
 

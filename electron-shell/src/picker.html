@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>选择路径</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif;
+      background: #f4f5f8;
+      color: #20242c;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      background: #f4f5f8;
+    }
+
+    header {
+      padding: 14px 18px 10px;
+      border-bottom: 1px solid #d9dde6;
+      background: #ffffff;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .path-row,
+    .save-row,
+    footer {
+      display: grid;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 18px;
+      background: #ffffff;
+      border-bottom: 1px solid #e1e4eb;
+    }
+
+    .path-row {
+      grid-template-columns: auto auto 1fr auto;
+    }
+
+    .save-row {
+      grid-template-columns: 86px 1fr;
+    }
+
+    footer {
+      grid-template-columns: 1fr auto auto;
+      border-top: 1px solid #d9dde6;
+      border-bottom: 0;
+    }
+
+    input {
+      width: 100%;
+      height: 34px;
+      border: 1px solid #c9ced9;
+      border-radius: 6px;
+      padding: 0 10px;
+      font-size: 13px;
+      background: #ffffff;
+      color: #20242c;
+    }
+
+    button {
+      height: 34px;
+      border: 1px solid #b9bfcb;
+      border-radius: 6px;
+      padding: 0 12px;
+      background: #ffffff;
+      color: #20242c;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    button.primary {
+      border-color: #2768d8;
+      background: #2768d8;
+      color: #ffffff;
+      min-width: 92px;
+    }
+
+    button:disabled {
+      opacity: 0.48;
+      cursor: default;
+    }
+
+    main {
+      overflow: auto;
+      padding: 10px 18px 14px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #ffffff;
+      border: 1px solid #dfe3eb;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    th,
+    td {
+      height: 34px;
+      padding: 0 10px;
+      border-bottom: 1px solid #edf0f5;
+      text-align: left;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    th {
+      height: 30px;
+      color: #5d6573;
+      background: #f8f9fb;
+      font-weight: 600;
+    }
+
+    tr {
+      cursor: pointer;
+    }
+
+    tr:hover td {
+      background: #f4f7ff;
+    }
+
+    tr.selected td {
+      background: #dfeaff;
+    }
+
+    td.name {
+      width: 64%;
+      max-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    td.type,
+    td.size {
+      color: #687080;
+    }
+
+    .status {
+      min-width: 0;
+      color: #687080;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1 id="title">选择路径</h1>
+  </header>
+
+  <section class="path-row">
+    <button id="upButton">上一级</button>
+    <button id="homeButton">主目录</button>
+    <input id="pathInput" spellcheck="false">
+    <button id="goButton">跳转</button>
+  </section>
+
+  <section class="save-row hidden" id="saveRow">
+    <label for="nameInput">文件名</label>
+    <input id="nameInput" spellcheck="false">
+  </section>
+
+  <main>
+    <table>
+      <thead>
+        <tr>
+          <th>名称</th>
+          <th>类型</th>
+          <th>大小</th>
+          <th>修改时间</th>
+        </tr>
+      </thead>
+      <tbody id="entries"></tbody>
+    </table>
+  </main>
+
+  <footer>
+    <div class="status" id="status">正在读取...</div>
+    <button id="cancelButton">取消</button>
+    <button class="primary" id="chooseButton" disabled>确定</button>
+  </footer>
+
+  <script src="picker.js"></script>
+</body>
+</html>

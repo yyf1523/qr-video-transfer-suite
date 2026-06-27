@@ -224,6 +224,12 @@ function timestampForPath() {
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
 }
 
+function ensureExtension(filePath, extension) {
+  const trimmed = String(filePath || "").trim();
+  if (!trimmed) return "";
+  return trimmed.toLowerCase().endsWith(extension.toLowerCase()) ? trimmed : `${trimmed}${extension}`;
+}
+
 function activateTab(tabName) {
   const tab = document.querySelector(`.tab[data-tab="${tabName}"]`);
   const panel = $(`panel-${tabName}`);
@@ -256,11 +262,14 @@ function wirePickers() {
             filters: [{ name: "压缩包", extensions: ["zip", "7z", "tar", "gz", "tgz"] }]
           });
         } else if (kind === "saveVideo") {
-          value = await window.qrSuite.saveFile({ defaultPath: target.value || "hd_secure_stream.mp4", filters: [{ name: "MP4", extensions: ["mp4"] }] });
+          value = await window.qrSuite.saveFile({ defaultPath: ensureExtension(target.value || "hd_secure_stream", ".mp4"), filters: [{ name: "MP4", extensions: ["mp4"] }] });
+          if (value) value = ensureExtension(value, ".mp4");
         } else if (kind === "saveRecording") {
           value = await window.qrSuite.saveFile({ defaultPath: target.value || defaultRecordingPath(), filters: [{ name: "MP4", extensions: ["mp4"] }] });
+          if (value) value = ensureExtension(value, ".mp4");
         } else if (kind === "savePng") {
           value = await window.qrSuite.saveFile({ defaultPath: target.value || "text-qr.png", filters: [{ name: "PNG", extensions: ["png"] }] });
+          if (value) value = ensureExtension(value, ".png");
         } else if (kind === "video") {
           value = await window.qrSuite.openFile({ title: "选择视频文件", filters: [{ name: "视频", extensions: ["mp4", "avi", "mov", "mkv", "webm"] }] });
         } else {
@@ -503,7 +512,12 @@ function wireVideoTasks() {
   encodeButton.addEventListener("click", async () => {
     const args = [];
     if ($("encSource").value.trim()) args.push("--source", $("encSource").value.trim());
-    const output = $("encOutput").value.trim() || "hd_secure_stream.mp4";
+    const rawOutput = $("encOutput").value.trim() || "hd_secure_stream.mp4";
+    const output = ensureExtension(rawOutput, ".mp4");
+    if (output !== rawOutput) {
+      $("encOutput").value = output;
+      log(`输出路径已自动改为 MP4：${output}`);
+    }
     args.push("-o", output);
     if ($("encFastFec").checked) args.push("--fast-fec-4qr");
     appendPerformanceDefaults(args, $("encExtra").value);

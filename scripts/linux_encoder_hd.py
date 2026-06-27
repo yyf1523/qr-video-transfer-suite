@@ -917,6 +917,13 @@ def should_transcode_for_uos(args: argparse.Namespace, output: Path) -> bool:
     return args.mp4_profile == "uos" and output.suffix.lower() == ".mp4"
 
 
+def normalize_video_output(args: argparse.Namespace) -> None:
+    output = Path(args.output)
+    if output.suffix.lower() not in {".mp4", ".avi"}:
+        args.output = str(Path(f"{args.output}.mp4"))
+        print(f"[WARN] Output video extension was not recognized; using: {args.output}", file=sys.stderr)
+
+
 def opencv_stage_path(output: Path) -> Path:
     return output.with_name(f"{output.stem}.opencv-source{output.suffix}")
 
@@ -1293,6 +1300,7 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
 
 def main(argv: Iterable[str] = sys.argv[1:]) -> int:
     args = parse_args(argv)
+    normalize_video_output(args)
     items = collect_inputs(args)
     if not items:
         print("No input files found.", file=sys.stderr)
