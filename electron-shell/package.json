@@ -1,6 +1,6 @@
 {
   "name": "qr-video-transfer-suite",
-  "version": "2026.6.28-hotfix.1",
+  "version": "2026.6.29",
   "description": "Electron shell for QR video transfer tools.",
   "main": "src/main.cjs",
   "private": true,

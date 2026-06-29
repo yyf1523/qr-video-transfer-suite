@@ -172,15 +172,15 @@ ENCODER_EXTRA_ARGS="--qr-version 40 --box-size 4 --chunk-size 850 --fps 60 --rep
 电脑录屏 2x2 高密度模式推荐：
 
 ```bash
-ENCODER_EXTRA_ARGS="--payload-mode binary --qr-error-correction H --qr-version 40 --box-size 2 --chunk-size 1200 --fps 60 --repeat 5 --passes 1 --grid-cols 2 --grid-rows 2 --grid-gap 16 --label-height 84 --label-scale 0.55 --label-thickness 1 --meta-qr-size 64 --meta-qr-version 6 --meta-qr-box-size 2 --color-border 20 --outer-white 10" bash scripts/encode_auto.sh
+ENCODER_EXTRA_ARGS="--payload-mode binary --qr-error-correction H --qr-version 40 --box-size 2 --chunk-size 1100 --fps 60 --repeat 5 --passes 1 --grid-cols 2 --grid-rows 2 --grid-gap 16 --label-height 84 --label-scale 0.55 --label-thickness 1 --meta-qr-size 64 --meta-qr-version 6 --meta-qr-box-size 2 --color-border 20 --outer-white 10" bash scripts/encode_auto.sh
 ```
 
-这个模式一帧包含 4 个 QR，并且用二进制协议替代 ASCII/base64 协议。按 `1200` 字节/片、`60 FPS`、每组显示 `5` 帧估算，有效数据段理论净载荷约 `56 KiB/s`；完整视频还包含默认 3 秒白头和 3 秒黑尾，所以短文件按总时长计算会低一些。
+这个模式一帧包含 4 个 QR，并且用二进制协议替代 ASCII/base64 协议。按 `1100` 字节/片、`60 FPS`、每组显示 `5` 帧估算，有效数据段理论净载荷约 `52 KiB/s`；完整视频还包含默认 3 秒白头和 3 秒黑尾，所以短文件按总时长计算会低一些。
 
 本机 1080p 横向 4QR 推荐：
 
 ```bash
-ENCODER_EXTRA_ARGS="--payload-mode binary --qr-error-correction H --qr-version 40 --box-size 2 --chunk-size 1200 --fps 60 --repeat 5 --passes 1 --grid-cols 4 --grid-rows 1 --grid-gap 10 --canvas-width 1920 --canvas-height 1080 --label-height 64 --label-scale 0.45 --label-thickness 1 --meta-qr-size 48 --meta-qr-version 6 --meta-qr-box-size 2 --color-border 8 --outer-white 4" bash scripts/encode_auto.sh
+ENCODER_EXTRA_ARGS="--payload-mode binary --qr-error-correction H --qr-version 40 --box-size 2 --chunk-size 1100 --fps 60 --repeat 5 --passes 1 --grid-cols 4 --grid-rows 1 --grid-gap 10 --canvas-width 1920 --canvas-height 1080 --label-height 64 --label-scale 0.45 --label-thickness 1 --meta-qr-size 48 --meta-qr-version 6 --meta-qr-box-size 2 --color-border 8 --outer-white 4" bash scripts/encode_auto.sh
 ```
 
 这个模式视频本身就是 `1920x1080`，背景纯白，QR 横向居中排列，红框和外白边更窄，适合全屏播放时减少黑边。如果录屏区域不是 1080p，也可以把 `--canvas-width/--canvas-height` 改成录屏区域尺寸，例如 `1080x1028`。
@@ -198,6 +198,7 @@ python3 scripts/linux_encoder_hd.py --source source.zip -o hd_secure_stream.mp4 
 ```
 
 这个预设生成单个 MP4 文件，一帧横向放 4 个 QR，30 FPS、每片重复 2 帧，并按每 100 个数据分片附加 12 个 FEC 校验分片。少量缺片时，接收端会根据参数头或 manifest 自动恢复；缺口过大时本次解码会失败并输出缺失报告，需要提高 `--passes` / `--repeat` 后重新生成完整视频。
+预设内置 `1100` 字节分片，给 QR v40/H 留出协议头、文件名和 FEC 元数据余量；如果手动设置的 `--chunk-size` 过大，编码器会按实际文件名自动下调，避免生成到一半出现 `QR payload does not fit`。
 
 编码视频默认带前置参数缓冲：
 

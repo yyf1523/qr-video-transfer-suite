@@ -50,6 +50,7 @@ HEADER_SIZE = HEADER_STRUCT.size
 FEC_HEADER_STRUCT = struct.Struct(">4sBBIHIHHHHIH")
 FEC_HEADER_SIZE = FEC_HEADER_STRUCT.size
 MAX_FEC_SHARDS = 254
+FAST_FEC_4QR_CHUNK_SIZE = 1100
 
 
 @dataclass(frozen=True)
@@ -756,14 +757,17 @@ def make_qr_tile(
                 box_size=args.meta_qr_box_size,
                 border=2,
             )
-            meta_qr.add_data(meta_payload.decode("ascii"), optimize=0)
-            meta_qr.make(fit=False)
-            meta_img = meta_qr.make_image(fill_color="black", back_color="white").convert("RGB")
-            meta_cv = cv2.cvtColor(np.array(meta_img), cv2.COLOR_RGB2BGR)
-            meta_cv = cv2.resize(meta_cv, (args.meta_qr_size, args.meta_qr_size), interpolation=cv2.INTER_NEAREST)
-            y0 = max(0, (args.label_height - args.meta_qr_size) // 2)
-            x0 = 12
-            strip[y0 : y0 + args.meta_qr_size, x0 : x0 + args.meta_qr_size] = meta_cv
+            try:
+                meta_qr.add_data(meta_payload.decode("ascii"), optimize=0)
+                meta_qr.make(fit=False)
+                meta_img = meta_qr.make_image(fill_color="black", back_color="white").convert("RGB")
+                meta_cv = cv2.cvtColor(np.array(meta_img), cv2.COLOR_RGB2BGR)
+                meta_cv = cv2.resize(meta_cv, (args.meta_qr_size, args.meta_qr_size), interpolation=cv2.INTER_NEAREST)
+                y0 = max(0, (args.label_height - args.meta_qr_size) // 2)
+                x0 = 12
+                strip[y0 : y0 + args.meta_qr_size, x0 : x0 + args.meta_qr_size] = meta_cv
+            except Exception:
+                pass
         if label:
             font = cv2.FONT_HERSHEY_SIMPLEX
             scale = args.label_scale
@@ -775,6 +779,98 @@ def make_qr_tile(
         framed_img = np.vstack([strip, framed_img])
 
     return framed_img
+
+
+def qr_payload_fits(payload: bytes, args: argparse.Namespace) -> bool:
+    try:
+        import qrcode
+    except ImportError as exc:
+        raise SystemExit(
+            "Missing dependency. Install with: pip install -r requirements-linux-encoder.txt"
+        ) from exc
+
+    qr = qrcode.QRCode(
+        version=args.qr_version,
+        error_correction=qr_error_correction_constant(qrcode, args.qr_error_correction),
+        box_size=args.box_size,
+        border=args.qr_border,
+    )
+    try:
+        qr.add_data(payload, optimize=0)
+        qr.make(fit=False)
+        return True
+    except Exception:
+        return False
+
+
+def sample_chunk(length: int) -> bytes:
+    return bytes((index % 251 for index in range(max(0, length))))
+
+
+def max_representative_chunk_length(item: TransferFile, chunk_size: int) -> int:
+    file_size = item.path.stat().st_size
+    if file_size <= 0:
+        return 0
+    return min(file_size, chunk_size)
+
+
+def payloads_fit_qr_capacity(items: list[TransferFile], args: argparse.Namespace, chunk_size: int) -> bool:
+    for item in items:
+        total = chunk_count(item.path, chunk_size)
+        chunk_len = max_representative_chunk_length(item, chunk_size)
+        chunk = sample_chunk(chunk_len)
+        data_payload = build_frame_payload(item, 0, total, chunk, args.payload_mode)
+        if not qr_payload_fits(data_payload, args):
+            return False
+
+        if fec_enabled(args):
+            data_count = min(total, args.fec_group_size)
+            fec_payload = build_fec_payload(
+                item=item,
+                total=total,
+                group_index=0,
+                group_start=0,
+                data_count=data_count,
+                parity_count=args.fec_parity_chunks,
+                shard_index=data_count,
+                shard=chunk,
+            )
+            if not qr_payload_fits(fec_payload, args):
+                return False
+
+    return True
+
+
+def adjust_chunk_size_for_qr_capacity(items: list[TransferFile], args: argparse.Namespace) -> None:
+    if not items or payloads_fit_qr_capacity(items, args, args.chunk_size):
+        return
+
+    requested = args.chunk_size
+    low = 1
+    high = requested - 1
+    best = 0
+    while low <= high:
+        mid = (low + high) // 2
+        if payloads_fit_qr_capacity(items, args, mid):
+            best = mid
+            low = mid + 1
+        else:
+            high = mid - 1
+
+    if best < 1:
+        raise SystemExit(
+            "QR payload does not fit even at --chunk-size 1. "
+            "Lower file name length, lower QR error correction, or change QR settings."
+        )
+
+    safety_margin = min(64, max(8, best // 20))
+    adjusted = max(1, best - safety_margin)
+    args.chunk_size = adjusted
+    print(
+        f"[WARN] Requested --chunk-size {requested} exceeds QR version {args.qr_version} "
+        f"ECC {args.qr_error_correction} capacity for this file set; using {adjusted} bytes.",
+        file=sys.stderr,
+    )
 
 
 def make_qr_frame(
@@ -1231,7 +1327,7 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
         preset("--qr-error-correction", "qr_error_correction", "H")
         preset("--qr-version", "qr_version", 40)
         preset("--box-size", "box_size", 2)
-        preset("--chunk-size", "chunk_size", 1200)
+        preset("--chunk-size", "chunk_size", FAST_FEC_4QR_CHUNK_SIZE)
         preset("--fps", "fps", 30.0)
         preset("--repeat", "repeat", 2)
         preset("--passes", "passes", 1)
@@ -1307,6 +1403,7 @@ def main(argv: Iterable[str] = sys.argv[1:]) -> int:
         print("Example: python3 scripts/linux_encoder_hd.py --source source.zip", file=sys.stderr)
         return 2
 
+    adjust_chunk_size_for_qr_capacity(items, args)
     generate_video(items, args)
     return 0
 
