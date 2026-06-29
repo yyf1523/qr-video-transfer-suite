@@ -100,6 +100,8 @@
           </div>
           <div class="options-row">
             <label><input type="checkbox" id="encFastFec" checked /> 4QR / 30FPS / repeat=2 / FEC 100+12</label>
+            <label><input type="checkbox" id="encPipeOutput" /> 快速管道输出</label>
+            <label><input type="checkbox" id="encHardwareH264" /> VAAPI 硬件编码</label>
             <label>额外参数<input id="encExtra" value="--workers 6 --memory-gb 6" placeholder="可追加 --param-intro-seconds 10" /></label>
           </div>
           <button class="primary" id="runEncode">开始加码</button>

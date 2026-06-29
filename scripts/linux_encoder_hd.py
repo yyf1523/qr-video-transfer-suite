@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import copy
 from concurrent.futures import Executor, ThreadPoolExecutor
 import hashlib
 import json
@@ -20,6 +21,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import zlib
 from dataclasses import dataclass
 from datetime import datetime
@@ -1013,6 +1015,10 @@ def should_transcode_for_uos(args: argparse.Namespace, output: Path) -> bool:
     return args.mp4_profile == "uos" and output.suffix.lower() == ".mp4"
 
 
+def should_pipe_for_uos(args: argparse.Namespace, output: Path) -> bool:
+    return args.mp4_profile == "uos-pipe" and output.suffix.lower() == ".mp4"
+
+
 def normalize_video_output(args: argparse.Namespace) -> None:
     output = Path(args.output)
     if output.suffix.lower() not in {".mp4", ".avi"}:
@@ -1028,6 +1034,231 @@ def h264_stage_path(output: Path) -> Path:
     return output.with_name(f"{output.stem}.h264{output.suffix}")
 
 
+class FfmpegPipeError(RuntimeError):
+    pass
+
+
+class FfmpegPipeFrameWriter:
+    def __init__(self, command: list[str], temp_output: Path, output: Path, env: dict[str, str] | None = None):
+        self.command = command
+        self.temp_output = temp_output
+        self.output = output
+        self.stderr_file = tempfile.TemporaryFile(mode="w+t", encoding="utf-8", errors="replace")
+        try:
+            self.process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=self.stderr_file,
+                env=env,
+            )
+        except OSError as exc:
+            self.stderr_file.close()
+            raise FfmpegPipeError(f"Could not start ffmpeg pipe writer: {exc}") from exc
+        if self.process.stdin is None:
+            self.stderr_file.close()
+            raise FfmpegPipeError("Could not open ffmpeg stdin pipe.")
+
+    def _stderr_text(self) -> str:
+        try:
+            self.stderr_file.flush()
+            self.stderr_file.seek(0)
+            return self.stderr_file.read().strip()
+        except Exception:
+            return ""
+
+    def write(self, frame) -> None:
+        if self.process.poll() is not None:
+            raise FfmpegPipeError(
+                f"ffmpeg exited before all frames were written, code={self.process.returncode}. "
+                f"{self._stderr_text()}"
+            )
+        try:
+            self.process.stdin.write(frame.tobytes(order="C"))
+        except (BrokenPipeError, OSError) as exc:
+            raise FfmpegPipeError(f"ffmpeg pipe write failed: {exc}. {self._stderr_text()}") from exc
+
+    def release(self) -> None:
+        try:
+            if self.process.stdin and not self.process.stdin.closed:
+                self.process.stdin.close()
+            code = self.process.wait()
+            stderr_text = self._stderr_text()
+        finally:
+            self.stderr_file.close()
+        if code != 0 or not self.temp_output.exists() or self.temp_output.stat().st_size == 0:
+            self.temp_output.unlink(missing_ok=True)
+            raise FfmpegPipeError(
+                f"ffmpeg pipe writer failed, code={code}. {stderr_text or 'No ffmpeg stderr.'}"
+            )
+        os.replace(self.temp_output, self.output)
+
+
+class OpenCvFrameWriter:
+    def __init__(self, path: Path, fourcc: int, fps: float, size: tuple[int, int]):
+        import cv2
+
+        self.path = path
+        self.writer = cv2.VideoWriter(str(path), fourcc, fps, size)
+        if not self.writer.isOpened():
+            raise SystemExit(f"Could not open video writer for: {path}")
+
+    def write(self, frame) -> None:
+        self.writer.write(frame)
+
+    def release(self) -> None:
+        self.writer.release()
+
+
+def resolve_vaapi_device(args: argparse.Namespace) -> str | None:
+    if args.h264_hw_device:
+        return args.h264_hw_device
+    for candidate in ("/dev/dri/renderD128", "/dev/dri/renderD129", "/dev/dri/card0"):
+        if Path(candidate).exists():
+            return candidate
+    return None
+
+
+def h264_command_parts(args: argparse.Namespace, encoder: str | None = None) -> tuple[list[str], list[str], list[str]]:
+    selected = encoder or args.h264_encoder
+    if selected == "libx264":
+        return (
+            [],
+            [],
+            [
+                "-c:v",
+                "libx264",
+                "-preset",
+                args.h264_preset,
+                "-crf",
+                str(args.h264_crf),
+                "-pix_fmt",
+                "yuv420p",
+            ],
+        )
+    if selected == "h264_vaapi":
+        device = resolve_vaapi_device(args)
+        if not device:
+            raise FfmpegPipeError("h264_vaapi requested but no /dev/dri VAAPI device was found.")
+        return (
+            ["-vaapi_device", device],
+            ["-vf", "format=nv12,hwupload"],
+            ["-c:v", "h264_vaapi", "-qp", str(args.h264_qp)],
+        )
+    raise FfmpegPipeError(f"Unsupported H.264 encoder: {selected}")
+
+
+def ffmpeg_process_env(encoder: str) -> dict[str, str] | None:
+    if encoder != "h264_vaapi":
+        return None
+    env = os.environ.copy()
+    if env.get("LIBVA_DRIVER_NAME") == "dummy":
+        env.pop("LIBVA_DRIVER_NAME", None)
+    env.pop("GST_VAAPI_ALL_DRIVERS", None)
+    return env
+
+
+def vaapi_probe(args: argparse.Namespace) -> tuple[bool, str]:
+    ffmpeg = resolve_ffmpeg(args)
+    if not ffmpeg:
+        return False, "ffmpeg executable was not found."
+
+    device = resolve_vaapi_device(args)
+    if not device:
+        return False, "no /dev/dri VAAPI device was found."
+
+    command = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-vaapi_device",
+        device,
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=white:s=64x64:r=1:d=0.1",
+        "-vf",
+        "format=nv12,hwupload",
+        "-frames:v",
+        "1",
+        "-c:v",
+        "h264_vaapi",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=8,
+            env=ffmpeg_process_env("h264_vaapi"),
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"ffmpeg VAAPI probe could not run: {exc}"
+
+    if result.returncode == 0:
+        return True, device
+    return False, "the desktop GPU driver does not expose VAAPI H.264 encoding."
+
+
+def build_ffmpeg_h264_command(
+    ffmpeg: str,
+    input_args: list[str],
+    output: Path,
+    args: argparse.Namespace,
+    encoder: str | None = None,
+) -> list[str]:
+    device_args, filter_args, encoder_args = h264_command_parts(args, encoder=encoder)
+    return [
+        ffmpeg,
+        "-y",
+        "-loglevel",
+        "warning",
+        *device_args,
+        *input_args,
+        "-an",
+        *filter_args,
+        *encoder_args,
+        "-movflags",
+        "+faststart",
+        str(output),
+    ]
+
+
+def create_ffmpeg_pipe_writer(output: Path, width: int, height: int, args: argparse.Namespace) -> FfmpegPipeFrameWriter:
+    ffmpeg = resolve_ffmpeg(args)
+    if not ffmpeg:
+        raise FfmpegPipeError("ffmpeg not found; cannot use --mp4-profile uos-pipe.")
+    tmp_output = h264_stage_path(output)
+    tmp_output.unlink(missing_ok=True)
+    input_args = [
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "bgr24",
+        "-s:v",
+        f"{width}x{height}",
+        "-r",
+        str(args.fps),
+        "-i",
+        "pipe:0",
+    ]
+    command = build_ffmpeg_h264_command(ffmpeg, input_args, tmp_output, args)
+    print(
+        f"[INFO] Writing UOS-compatible MP4 through ffmpeg pipe: "
+        f"{Path(ffmpeg).name}, encoder={args.h264_encoder}"
+    )
+    return FfmpegPipeFrameWriter(command, tmp_output, output, env=ffmpeg_process_env(args.h264_encoder))
+
+
 def transcode_mp4_for_uos(source: Path, output: Path, args: argparse.Namespace) -> bool:
     ffmpeg = resolve_ffmpeg(args)
     if not ffmpeg:
@@ -1039,52 +1270,50 @@ def transcode_mp4_for_uos(source: Path, output: Path, args: argparse.Namespace) 
         os.replace(source, output)
         return False
 
-    tmp_output = h264_stage_path(output)
-    if tmp_output.exists():
-        tmp_output.unlink()
-    command = [
-        ffmpeg,
-        "-y",
-        "-loglevel",
-        "warning",
-        "-i",
-        str(source),
-        "-an",
-        "-c:v",
-        "libx264",
-        "-preset",
-        args.h264_preset,
-        "-crf",
-        str(args.h264_crf),
-        "-pix_fmt",
-        "yuv420p",
-        "-movflags",
-        "+faststart",
-        str(tmp_output),
-    ]
-    print(f"[INFO] Converting MP4 for UOS default player with ffmpeg: {Path(ffmpeg).name}")
-    result = subprocess.run(command, text=True, capture_output=True, check=False)
-    if result.stdout:
-        print(result.stdout, end="")
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
-    if result.returncode != 0 or not tmp_output.exists():
-        print(
-            "[WARN] ffmpeg H.264 conversion failed; keeping OpenCV mp4v output. "
-            "UOS default player may not be able to play this MP4.",
-            file=sys.stderr,
-        )
-        os.replace(source, output)
+    encoders = [args.h264_encoder]
+    if args.h264_encoder != "libx264":
+        encoders.append("libx264")
+
+    for encoder in encoders:
+        tmp_output = h264_stage_path(output)
         if tmp_output.exists():
             tmp_output.unlink()
-        return False
-    os.replace(tmp_output, output)
-    source.unlink(missing_ok=True)
-    print(f"[DONE] UOS-compatible H.264 MP4 written: {output.resolve()}")
-    return True
+        try:
+            command = build_ffmpeg_h264_command(ffmpeg, ["-i", str(source)], tmp_output, args, encoder=encoder)
+        except FfmpegPipeError as exc:
+            print(f"[WARN] {exc}", file=sys.stderr)
+            continue
+        print(f"[INFO] Converting MP4 for UOS default player with ffmpeg: {Path(ffmpeg).name}, encoder={encoder}")
+        result = subprocess.run(
+            command,
+            text=True,
+            capture_output=True,
+            check=False,
+            env=ffmpeg_process_env(encoder),
+        )
+        if result.stdout:
+            print(result.stdout, end="")
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr)
+        if result.returncode == 0 and tmp_output.exists():
+            os.replace(tmp_output, output)
+            source.unlink(missing_ok=True)
+            print(f"[DONE] UOS-compatible H.264 MP4 written: {output.resolve()}")
+            return True
+        print(f"[WARN] ffmpeg H.264 conversion failed with encoder={encoder}.", file=sys.stderr)
+        if tmp_output.exists():
+            tmp_output.unlink()
+
+    print(
+        "[WARN] ffmpeg H.264 conversion failed; keeping OpenCV mp4v output. "
+        "UOS default player may not be able to play this MP4.",
+        file=sys.stderr,
+    )
+    os.replace(source, output)
+    return False
 
 
-def generate_video(items: list[TransferFile], args: argparse.Namespace) -> None:
+def generate_video_once(items: list[TransferFile], args: argparse.Namespace, use_pipe_writer: bool = False) -> None:
     import cv2
     import numpy as np
 
@@ -1095,10 +1324,9 @@ def generate_video(items: list[TransferFile], args: argparse.Namespace) -> None:
 
     output_path = str(Path(args.output))
     output = Path(output_path)
-    transcode_for_uos = should_transcode_for_uos(args, output)
-    writer_output = opencv_stage_path(output) if transcode_for_uos else output
+    transcode_for_uos = not use_pipe_writer and should_transcode_for_uos(args, output)
+    writer_output = output if use_pipe_writer else (opencv_stage_path(output) if transcode_for_uos else output)
     width, height = frame_size(args)
-    fourcc = writer_fourcc(str(writer_output), args.codec)
     white_frame = np.full((height, width, 3), 255, dtype=np.uint8)
     black_frame = np.zeros((height, width, 3), dtype=np.uint8)
     param_intro_frames = int(args.fps * args.param_intro_seconds)
@@ -1129,11 +1357,13 @@ def generate_video(items: list[TransferFile], args: argparse.Namespace) -> None:
     written = 0
     video_frames_written = 0
     output.parent.mkdir(parents=True, exist_ok=True)
-    if transcode_for_uos and writer_output.exists():
+    if not use_pipe_writer and transcode_for_uos and writer_output.exists():
         writer_output.unlink()
-    writer = cv2.VideoWriter(str(writer_output), fourcc, args.fps, (width, height))
-    if not writer.isOpened():
-        raise SystemExit(f"Could not open video writer for: {writer_output}")
+    if use_pipe_writer:
+        writer = create_ffmpeg_pipe_writer(output, width, height, args)
+    else:
+        fourcc = writer_fourcc(str(writer_output), args.codec)
+        writer = OpenCvFrameWriter(writer_output, fourcc, args.fps, (width, height))
     executor = ThreadPoolExecutor(max_workers=args.workers) if args.workers > 1 else None
 
     def emit_progress(done: int, total: int, detail: str = "") -> None:
@@ -1169,6 +1399,8 @@ def generate_video(items: list[TransferFile], args: argparse.Namespace) -> None:
             write_data_frame(pending_packets)
         return []
 
+    body_error: Exception | None = None
+    release_error: Exception | None = None
     try:
         if param_intro_frames > 0:
             parameter_frame = render_parameter_intro_frame(manifests, args)
@@ -1243,16 +1475,58 @@ def generate_video(items: list[TransferFile], args: argparse.Namespace) -> None:
             pending_packets = flush_packets(pending_packets, force=True)
         for _ in range(outro_frames):
             writer.write(outro_frame)
+    except Exception as exc:
+        body_error = exc
     finally:
-        writer.release()
+        try:
+            writer.release()
+        except Exception as exc:
+            release_error = exc
         if executor is not None:
             executor.shutdown(wait=True)
+    if body_error is not None:
+        raise body_error
+    if release_error is not None:
+        raise release_error
     if transcode_for_uos:
         transcode_mp4_for_uos(writer_output, output, args)
     emit_progress(progress_total, progress_total, "done")
     print(f"[DONE] Video generated: {Path(output_path).resolve()}")
     print(f"[DONE] Data QR repeats written: {written}")
     print(f"[DONE] Data video frames written: {video_frames_written}")
+
+
+def generate_video(items: list[TransferFile], args: argparse.Namespace) -> None:
+    output = Path(str(Path(args.output)))
+    if should_pipe_for_uos(args, output):
+        if args.h264_encoder == "h264_vaapi":
+            vaapi_ok, vaapi_detail = vaapi_probe(args)
+            if not vaapi_ok:
+                print(
+                    "[WARN] h264_vaapi requested but VAAPI is not usable on this desktop; "
+                    f"using compatible two-step UOS output with libx264. Probe: {vaapi_detail}",
+                    file=sys.stderr,
+                )
+                fallback_args = copy.copy(args)
+                fallback_args.mp4_profile = "uos"
+                fallback_args.h264_encoder = "libx264"
+                generate_video_once(items, fallback_args, use_pipe_writer=False)
+                return
+        try:
+            generate_video_once(items, args, use_pipe_writer=True)
+            return
+        except FfmpegPipeError as exc:
+            print(
+                f"[WARN] ffmpeg pipe output failed; falling back to compatible two-step UOS output. {exc}",
+                file=sys.stderr,
+            )
+            fallback_args = copy.copy(args)
+            fallback_args.mp4_profile = "uos"
+            fallback_args.h264_encoder = "libx264"
+            generate_video_once(items, fallback_args, use_pipe_writer=False)
+            return
+
+    generate_video_once(items, args, use_pipe_writer=False)
 
 
 def provided_long_options(argv: list[str]) -> set[str]:
@@ -1302,11 +1576,14 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     parser.add_argument("--codec", help="OpenCV FourCC codec for the intermediate writer, for example mp4v, MJPG, XVID.")
     parser.add_argument(
         "--mp4-profile",
-        choices=("uos", "opencv"),
+        choices=("uos", "uos-pipe", "opencv"),
         default="uos",
-        help="MP4 compatibility profile. uos transcodes final MP4 to H.264/yuv420p when ffmpeg is available.",
+        help="MP4 compatibility profile. uos uses OpenCV then ffmpeg; uos-pipe writes frames directly to ffmpeg; opencv skips H.264 conversion.",
     )
-    parser.add_argument("--ffmpeg", help="ffmpeg executable path for --mp4-profile uos. Defaults to bundled ffmpeg, FFMPEG env, or PATH.")
+    parser.add_argument("--ffmpeg", help="ffmpeg executable path for UOS MP4 profiles. Defaults to bundled ffmpeg, FFMPEG env, or PATH.")
+    parser.add_argument("--h264-encoder", choices=("libx264", "h264_vaapi"), default="libx264", help="H.264 encoder for UOS MP4 output. h264_vaapi enables VAAPI hardware encoding when available.")
+    parser.add_argument("--h264-hw-device", help="Hardware encoder device, for example /dev/dri/renderD128 for h264_vaapi.")
+    parser.add_argument("--h264-qp", type=int, default=18, help="Hardware H.264 QP for h264_vaapi. Lower is clearer/larger.")
     parser.add_argument("--h264-crf", type=int, default=12, help="H.264 CRF for UOS-compatible MP4. Lower is clearer/larger.")
     parser.add_argument("--h264-preset", default="veryfast", help="ffmpeg libx264 preset for UOS-compatible MP4.")
     parser.add_argument("--workers", type=int, default=0, help="QR rendering workers. 0 auto-selects up to 6 workers.")
@@ -1368,6 +1645,8 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
         parser.error("--param-intro-seconds, --intro-seconds, and --outro-seconds must not be negative")
     if args.h264_crf < 0 or args.h264_crf > 51:
         parser.error("--h264-crf must be between 0 and 51")
+    if args.h264_qp < 0 or args.h264_qp > 51:
+        parser.error("--h264-qp must be between 0 and 51")
     if args.workers < 0:
         parser.error("--workers must be zero or positive")
     if args.workers == 0:

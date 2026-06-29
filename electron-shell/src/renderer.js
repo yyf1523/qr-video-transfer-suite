@@ -520,6 +520,8 @@ function wireVideoTasks() {
     }
     args.push("-o", output);
     if ($("encFastFec").checked) args.push("--fast-fec-4qr");
+    if ($("encPipeOutput").checked) args.push("--mp4-profile", "uos-pipe");
+    if ($("encHardwareH264").checked) args.push("--h264-encoder", "h264_vaapi");
     appendPerformanceDefaults(args, $("encExtra").value);
     await runStreamingTask(encodeButton, "videoEncode", args);
   });

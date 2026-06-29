@@ -209,6 +209,9 @@ python3 scripts/linux_encoder_hd.py --source source.zip -o hd_secure_stream.mp4 
 MP4 播放器兼容性：
 
 - 默认 `--mp4-profile uos`：先用 OpenCV 生成中间视频，再用随包或系统 `ffmpeg` 转成 `H.264 + yuv420p + .mp4`，适合 UOS 默认播放器。
+- 快速兼容输出可加 `--mp4-profile uos-pipe`：Python 直接把 BGR 帧通过 stdin 管道写给 `ffmpeg`，省掉中间 MP4 的一次编码/解码和磁盘 IO；如果管道失败，会自动回退到默认 `uos` 两段式流程重新生成。
+- 需要尝试硬件编码时可加 `--h264-encoder h264_vaapi`，可选 `--h264-hw-device /dev/dri/renderD128`。脚本会先短探测 VAAPI；不可用时直接回退到 `libx264` 软件编码，避免 `libva` 错误刷屏。
+- 快速软件转码建议：`--mp4-profile uos-pipe --h264-preset ultrafast --h264-crf 18`。更稳更清晰则继续使用默认 `veryfast + crf 12`。
 - 如果缺少 `ffmpeg`，脚本会保留 OpenCV 的 `mp4v` MP4 并打印警告；这种文件可以用于传输/解码，但 UOS 默认播放器可能打不开。
 - 如需保留旧的 OpenCV 直写 MP4，可加 `--mp4-profile opencv`。
 - Electron 图形界面的“播放与录制”页提供专用播放器和屏幕录制器，适合在 UOS/云桌面里全屏循环播放 4QR 视频，再在接收端录制并自动解码。
