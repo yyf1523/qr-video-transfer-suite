@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, screen, shell } = require("electron");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
@@ -33,6 +33,7 @@ const toolsRoot = isPackaged ? path.join(process.resourcesPath, "tools") : path.
 const activeRecordings = new Map();
 const playerWindows = new Set();
 const pickerWindows = new Set();
+const regionSelectorWindows = new Set();
 let logFilePath = null;
 
 function timestampForFile(date = new Date()) {
@@ -244,6 +245,8 @@ function zenityFilter(filters = []) {
   const archiveExts = new Set(["zip", "7z", "tar", "gz", "tgz"]);
   const videoExts = new Set(["mp4", "avi", "mov", "mkv", "webm"]);
   const pngExts = new Set(["png"]);
+  const imageExts = new Set(["png", "jpg", "jpeg", "bmp", "webp"]);
+  const jsonExts = new Set(["json"]);
   const selected = [];
   for (const filter of filters) {
     for (const ext of filter.extensions || []) {
@@ -256,6 +259,12 @@ function zenityFilter(filters = []) {
   }
   if ([...videoExts].some((ext) => extSet.has(ext))) {
     return ["--file-filter=Videos | *.mp4 *.avi *.mov *.mkv *.webm"];
+  }
+  if ([...imageExts].some((ext) => extSet.has(ext))) {
+    return ["--file-filter=Images | *.png *.jpg *.jpeg *.bmp *.webp"];
+  }
+  if ([...jsonExts].some((ext) => extSet.has(ext))) {
+    return ["--file-filter=JSON | *.json"];
   }
   if ([...pngExts].some((ext) => extSet.has(ext))) {
     return ["--file-filter=PNG | *.png"];
@@ -270,6 +279,12 @@ function kdialogFilter(filters = []) {
   }
   if (["mp4", "avi", "mov", "mkv", "webm"].some((ext) => selected.has(ext))) {
     return "Videos (*.mp4 *.avi *.mov *.mkv *.webm)";
+  }
+  if (["png", "jpg", "jpeg", "bmp", "webp"].some((ext) => selected.has(ext))) {
+    return "Images (*.png *.jpg *.jpeg *.bmp *.webp)";
+  }
+  if (selected.has("json")) {
+    return "JSON (*.json)";
   }
   if (selected.has("png")) {
     return "PNG (*.png)";
@@ -332,6 +347,9 @@ function listPickerDirectory(payload = {}) {
     }
     const isDirectory = entry.isDirectory();
     const selectable = mode === "openDirectory" ? isDirectory : !isDirectory && fileExtensionMatches(entry.name, extensions);
+    if (mode === "openFile" && !isDirectory && !selectable) {
+      continue;
+    }
     entries.push({
       name: entry.name,
       path: fullPath,
@@ -451,6 +469,119 @@ function showInternalFilePicker(mode, options = {}, parentWindow = null) {
       }
     });
     writeLog("info", "Internal file picker opened", { token, mode, initialDirectory, filters });
+  });
+}
+
+// 返回按"主屏优先，其余按坐标从左到右、从上到下"排序的 Electron 显示器列表，
+// 使显示器索引在框选界面里有稳定、可预期的顺序。
+function orderedDisplaysForSelection() {
+  const displays = screen.getAllDisplays();
+  const primary = screen.getPrimaryDisplay();
+  const others = displays
+    .filter((display) => display.id !== primary.id)
+    .sort((left, right) => left.bounds.x - right.bounds.x || left.bounds.y - right.bounds.y);
+  return [primary, ...others];
+}
+
+// 依据录制显示器序号取对应的 Electron display（用于把框选遮罩放到正确的屏幕上）。
+// monitorIndex 来自渲染进程，源自 Python 端 mss 枚举（1 基，0 表示"全部显示器"）。
+// 注意：这里假设 mss 的显示器顺序与 orderedDisplaysForSelection() 的 Electron 顺序一致；
+//       在非常规多屏布局下二者可能错位。做了 (index-1) 归零并对越界/缺失回退到主屏，保证不崩溃。
+function displayForRecordingMonitor(monitorIndex = 1) {
+  const displays = orderedDisplaysForSelection();
+  const index = Math.max(1, Number(monitorIndex) || 1) - 1;
+  return displays[index] || displays[0] || screen.getPrimaryDisplay();
+}
+
+// 打开一个覆盖目标显示器的全屏透明遮罩窗口供用户拖拽框选录制区域。
+// 返回 Promise：确认框选得到 {x,y,width,height,...}，取消/关闭/过小则得到 null。
+// 采用"每次调用生成唯一 token + 按 token 注册一次性 IPC handler + settled 幂等 + cleanup"的模式，
+// 保证多次调用互不串扰，且无论走哪条结束路径（确认/取消/窗口 closed）都只 resolve 一次并注销 handler。
+function showRegionSelector(options = {}) {
+  const token = `region-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const display = displayForRecordingMonitor(options.monitor);
+  const selector = new BrowserWindow({
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    backgroundColor: "#00000000",
+    title: "框选录制区域",
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false
+    }
+  });
+  selector.setAlwaysOnTop(true, "screen-saver");
+  regionSelectorWindows.add(selector);
+
+  return new Promise((resolve) => {
+    const channels = {
+      finish: `regionSelector:finish:${token}`,
+      cancel: `regionSelector:cancel:${token}`
+    };
+    let settled = false;
+    const cleanup = () => {
+      ipcMain.removeHandler(channels.finish);
+      ipcMain.removeHandler(channels.cancel);
+      regionSelectorWindows.delete(selector);
+    };
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (!selector.isDestroyed()) {
+        selector.close();
+      }
+      resolve(value);
+    };
+
+    ipcMain.handle(channels.finish, (_event, payload = {}) => {
+      const rect = {
+        x: Math.max(0, Number(payload.x) || 0),
+        y: Math.max(0, Number(payload.y) || 0),
+        width: Math.max(0, Number(payload.width) || 0),
+        height: Math.max(0, Number(payload.height) || 0),
+        viewportWidth: Math.max(1, Number(payload.viewportWidth) || display.bounds.width),
+        viewportHeight: Math.max(1, Number(payload.viewportHeight) || display.bounds.height),
+        displayBounds: display.bounds,
+        scaleFactor: display.scaleFactor || 1
+      };
+      if (rect.width < 12 || rect.height < 12) {
+        finish(null);
+      } else {
+        finish(rect);
+      }
+      return true;
+    });
+    ipcMain.handle(channels.cancel, () => {
+      finish(null);
+      return true;
+    });
+    selector.on("closed", () => finish(null));
+    selector.once("ready-to-show", () => {
+      selector.show();
+      selector.focus();
+    });
+    selector.loadFile(path.join(__dirname, "region-selector.html"), {
+      query: {
+        token,
+        monitor: String(options.monitor || 1)
+      }
+    });
+    writeLog("info", "Region selector opened", { token, monitor: options.monitor, display: display.bounds });
   });
 }
 
@@ -810,6 +941,8 @@ ipcMain.handle("recording:listMonitors", async () => {
   }
   return JSON.parse(line.slice("[MONITORS] ".length));
 });
+
+ipcMain.handle("recording:selectRegion", (_event, payload = {}) => showRegionSelector(payload));
 
 ipcMain.handle("recording:start", (event, payload = {}) => {
   const runId = payload.runId || `record-${Date.now()}-${Math.random().toString(16).slice(2)}`;

@@ -598,6 +598,67 @@ label {
   border-bottom: 0;
 }
 
+.preset-panel {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 16px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card-soft);
+}
+
+.preset-panel > label {
+  justify-content: flex-start;
+  min-height: 0;
+  padding: 0;
+}
+
+.mode-detail {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(11, 132, 255, 0.14);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.mode-detail strong {
+  display: block;
+  color: #202633;
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.mode-detail p {
+  margin: 6px 0 10px;
+  color: #697181;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.mode-detail dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 14px;
+  margin: 0;
+}
+
+.mode-detail dt {
+  color: #8b93a3;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.mode-detail dd {
+  min-width: 0;
+  margin: 2px 0 0;
+  color: #222936;
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
 .pick {
   align-self: center;
   justify-self: center;
@@ -663,6 +724,20 @@ textarea {
   flex-direction: row;
   align-items: center;
   padding-bottom: 16px;
+}
+
+.options-row.compact-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.options-row.compact-options label:nth-child(3),
+.options-row.compact-options label:only-child {
+  grid-column: 1 / -1;
+}
+
+.options-row.compact-options label:only-child {
+  flex-direction: column;
+  align-items: stretch;
 }
 
 .options-row input[type="checkbox"] {
@@ -933,6 +1008,23 @@ button:disabled {
   margin-top: 14px;
 }
 
+.region-picker-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 112px;
+  gap: 12px;
+  align-items: end;
+  margin-top: 14px;
+}
+
+.region-picker-row .region-field {
+  margin-top: 0;
+}
+
+.region-picker-row button {
+  min-height: 45px;
+  padding: 10px 12px;
+}
+
 .auto-decode {
   margin-top: 14px;
 }
@@ -1048,6 +1140,7 @@ pre::selection {
 
   .hero-strip,
   .progress-card,
+  .preset-panel,
   .options-row,
   .text-layout {
     grid-template-columns: 1fr;
@@ -1094,6 +1187,14 @@ pre::selection {
 
 @media (max-width: 640px) {
   .record-settings {
+    grid-template-columns: 1fr;
+  }
+
+  .region-picker-row {
+    grid-template-columns: 1fr;
+  }
+
+  .mode-detail dl {
     grid-template-columns: 1fr;
   }
 

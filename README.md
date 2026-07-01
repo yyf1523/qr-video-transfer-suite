@@ -6,7 +6,7 @@
 
 - Linux/UOS 发送端：生成单个 H.264/yuv420p MP4，默认 4QR / 30FPS / repeat=2 / FEC。
 - Windows/Linux 接收端：读取手机录像或屏幕录制，自动识别前置 `QVP1` 参数二维码并解码。
-- Electron 工作台：集成视频加码、专用播放器、屏幕录制、录后自动解码和文本二维码。
+- Electron 工作台：集成视频加码、专用播放器、60 FPS 屏幕录制、框选录制区域、录后自动解码和文本二维码。
 - UOS 离线包：Release 内提供完整离线包，含 Electron、Python 3.11、依赖、ffmpeg 和软件渲染启动脚本。
 - 文本二维码：支持微信直扫原文模式，也支持高容量压缩模式。
 
@@ -15,7 +15,9 @@
 正式发布包在 GitHub Release 中提供：
 
 - `QRVideoTransfer-UOS-full-offline-YYYYMMDD.tar.gz`：UOS/Linux 完整离线包，推荐云桌面直接使用。
+- `QRVideoTransfer-UOS-AppImage-offline-YYYYMMDD.tar.gz`：UOS/Linux AppImage 离线包，体积更小。
 - `QRVideoTransfer-Linux-portable-tools-YYYYMMDD.tar.gz`：Linux 便携命令行工具包。
+- `QRVideoTransferSuite-YYYY.M.D-*-win-x64.msi`：Windows 11 安装包。
 - `SHA256SUMS.txt`：发布包校验值。
 
 UOS 完整离线包解压后优先运行：
@@ -37,6 +39,7 @@ UOS/云桌面入口会强制软件渲染并关闭 VAAPI/硬件视频加速探测
 
 界面日志区有“打开日志目录”按钮。若选择压缩包或播放视频后闪退，优先查看这两个日志文件；如果解压目录不可写，日志会退到系统临时目录 `qr-video-transfer-logs/`。
 UOS/Linux 默认使用应用内置文件选择器，不依赖系统安装 `zenity` 或 `kdialog`。如需临时回到系统原生对话框，可设置 `QR_SUITE_USE_NATIVE_DIALOG=1` 后再启动。
+内置文件选择器会按用途过滤后缀：加码只显示压缩包，播放/解码只显示视频，manifest 只显示 JSON，文本二维码只显示常见图片。
 
 ## 离线依赖准备
 
@@ -216,6 +219,17 @@ MP4 播放器兼容性：
 - 如需保留旧的 OpenCV 直写 MP4，可加 `--mp4-profile opencv`。
 - Electron 图形界面的“播放与录制”页提供专用播放器和屏幕录制器，适合在 UOS/云桌面里全屏循环播放 4QR 视频，再在接收端录制并自动解码。
 
+### Electron 加码模式
+
+Electron 工作台的“视频加码”页提供四档模式。选择后界面会显示中文说明和实际参数，默认输出视频名会跟随源码压缩包名称，例如 `source.7z` 默认生成 `source.mp4`。
+
+| 模式 | 主要参数 | 适用场景 |
+|---|---|---|
+| 平衡稳定版 | `1896x990`、4QR 横排、QR v30、`680` 字节/片、30 FPS、repeat=3、FEC 100+20 | Windows 截图工具录屏、云桌面 1896x990、轻微缩放 |
+| 高速直录版 | `1920x1080`、4QR 横排、QR v40、`1100` 字节/片、30 FPS、repeat=2、FEC 100+12 | 全屏无缩放、画面清晰、追求速度 |
+| 窗口稳妥版 | `1280x720`、2QR 横排、QR v30、`680` 字节/片、30 FPS、repeat=3、FEC 100+24 | 竖屏电脑、远程窗口较小、录屏压缩明显 |
+| 超稳兜底版 | `960x720`、单 QR、QR v30、`680` 字节/片、30 FPS、repeat=4、FEC 100+30 | 前三档仍缺块、压缩严重或窗口很小 |
+
 并发与内存预算：
 
 - 加码端 `--workers 0` 默认自动选择最多 6 个 worker，并发渲染同一帧内的多个二维码；视频写入仍串行，保证帧顺序稳定。
@@ -335,6 +349,19 @@ py -3 scripts\win_decoder_hd.py --record-screen --record-seconds 30 --record-onl
 - `--record-monitor 1`：录第一个显示器；`0` 表示录所有显示器。
 - `--record-region left,top,width,height`：只录指定区域，例如 `--record-region 100,80,1280,720`。
 - `--screen-mode`：适合直接视频/电脑录屏，会自动使用较快的解码参数。
+
+Electron 工作台的“播放与录制”页内置录屏入口，默认 60 FPS，支持点击“框选区域”拖拽选择云桌面画面范围；录制完成后可自动填入“视频解码”页并开始解码。
+
+### Electron 解码模式
+
+“视频解码”页提供四档模式。选择视频后，输出目录默认跟随视频名；如果视频中只有一个源码压缩包，解码出的压缩包文件名也会跟随视频名，同时保留原压缩包后缀，例如 `node.mp4` 默认还原为 `node.7z`。
+
+| 模式 | 主要参数 | 适用场景 |
+|---|---|---|
+| Windows 录屏稳健 | 自动读取 `QVP1`、开启噪声增强、全帧回退到 1920px、每 120 帧输出进度 | Windows 截图工具录出来的 MP4，默认推荐 |
+| 自动匹配 | 自动读取 `QVP1` 参数二维码 | 新版本工具生成且录屏清晰的视频 |
+| 旧版高速 4QR | `--screen-fast-fec-4qr` + 自动参数 | 早期 4QR / 30FPS / FEC 视频 |
+| 红框慢速救援 | 自动参数 + 红框透视校正 + 噪声增强 + 单线程/小步进 | 缺块多、压缩重、画面变形的视频 |
 
 如果在 Linux/WSL 或 Git Bash 里解码，也可以使用一键脚本：
 

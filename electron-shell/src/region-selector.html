@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>框选录制区域</title>
+    <link rel="stylesheet" href="./region-selector.css" />
+  </head>
+  <body>
+    <div class="shade" id="shade">
+      <div class="hint">
+        <strong>拖拽选择录制区域</strong>
+        <span>松开鼠标确认，Esc 取消</span>
+      </div>
+      <div class="selection" id="selection" hidden>
+        <span id="selectionSize">0×0</span>
+      </div>
+    </div>
+    <script src="./region-selector.js"></script>
+  </body>
+</html>

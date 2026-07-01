@@ -98,11 +98,21 @@
             <label>输出视频<input id="encOutput" value="hd_secure_stream.mp4" /></label>
             <button class="pick" data-pick="encOutput" data-kind="saveVideo">保存为</button>
           </div>
-          <div class="options-row">
-            <label><input type="checkbox" id="encFastFec" checked /> 4QR / 30FPS / repeat=2 / FEC 100+12</label>
+          <div class="preset-panel">
+            <label>加码模式
+              <select id="encMode">
+                <option value="balanced" selected>平衡稳定版（Windows 截图工具推荐）</option>
+                <option value="fast">高速直录版（全屏无缩放）</option>
+                <option value="window2">窗口稳妥版（竖屏/小窗口）</option>
+                <option value="safe1">超稳兜底版（最慢最稳）</option>
+              </select>
+            </label>
+            <div class="mode-detail" id="encModeDetail" aria-live="polite"></div>
+          </div>
+          <div class="options-row compact-options">
             <label><input type="checkbox" id="encPipeOutput" /> 快速管道输出</label>
             <label><input type="checkbox" id="encHardwareH264" /> VAAPI 硬件编码</label>
-            <label>额外参数<input id="encExtra" value="--workers 6 --memory-gb 6" placeholder="可追加 --param-intro-seconds 10" /></label>
+            <label>额外参数<input id="encExtra" value="--workers 6 --memory-gb 6" placeholder="可追加 --canvas-width 1920 --canvas-height 1080" /></label>
           </div>
           <button class="primary" id="runEncode">开始加码</button>
         </section>
@@ -117,15 +127,25 @@
           </div>
           <div class="form-grid">
             <label>录屏/录像文件<input id="decVideo" placeholder="screen_record.mp4" /></label>
-            <button class="pick" data-pick="decVideo" data-kind="file">选择文件</button>
+            <button class="pick" data-pick="decVideo" data-kind="video">选择文件</button>
             <label>manifest.json<input id="decManifest" placeholder="旧视频/FEC 可选；新视频会自动读取参数二维码" /></label>
-            <button class="pick" data-pick="decManifest" data-kind="file">选择文件</button>
+            <button class="pick" data-pick="decManifest" data-kind="manifest">选择文件</button>
             <label>输出目录<input id="decOutput" value="reconstructed_project" /></label>
             <button class="pick" data-pick="decOutput" data-kind="dir">选择目录</button>
           </div>
-          <div class="options-row">
-            <label><input type="checkbox" id="decFastFec" checked /> 4QR / 30FPS / FEC 解码预设</label>
-            <label>额外参数<input id="decExtra" value="--workers 6 --memory-gb 6" placeholder="可追加 --noise-robust" /></label>
+          <div class="preset-panel">
+            <label>解码模式
+              <select id="decMode">
+                <option value="winRecord" selected>Windows 录屏稳健（推荐）</option>
+                <option value="auto">自动匹配（清晰录屏）</option>
+                <option value="fast4">旧版高速 4QR</option>
+                <option value="redbox">红框慢速救援</option>
+              </select>
+            </label>
+            <div class="mode-detail" id="decModeDetail" aria-live="polite"></div>
+          </div>
+          <div class="options-row compact-options">
+            <label>额外参数<input id="decExtra" value="--workers 6 --memory-gb 6" placeholder="可追加 --max-frames 600" /></label>
           </div>
           <button class="primary" id="runDecode">开始解码</button>
         </section>
@@ -183,8 +203,8 @@
                 <fieldset class="segmented-field">
                   <legend>录制帧率</legend>
                   <div class="segmented-control">
-                    <label><input type="radio" name="recordFps" value="30" checked /><span>30 FPS</span></label>
-                    <label><input type="radio" name="recordFps" value="60" /><span>60 FPS</span></label>
+                    <label><input type="radio" name="recordFps" value="60" checked /><span>60 FPS</span></label>
+                    <label><input type="radio" name="recordFps" value="30" /><span>30 FPS</span></label>
                   </div>
                 </fieldset>
                 <label class="compact-field">倒计时
@@ -196,9 +216,12 @@
                 </label>
               </div>
 
-              <label class="region-field">录制区域（可选）
-                <input id="recordRegion" placeholder="left,top,width,height" />
-              </label>
+              <div class="region-picker-row">
+                <label class="region-field">录制区域（可选）
+                  <input id="recordRegion" placeholder="left,top,width,height" />
+                </label>
+                <button class="secondary" id="selectRecordRegion" type="button">框选区域</button>
+              </div>
               <label class="auto-decode"><input type="checkbox" id="recordAutoDecode" checked /> 录制完成后自动解码</label>
 
               <div class="button-row">
@@ -248,7 +271,7 @@
               <h4>解码二维码</h4>
               <div class="form-grid compact">
                 <label>输入图片<input id="textImage" placeholder="text-qr.png" /></label>
-                <button class="pick" data-pick="textImage" data-kind="file">选择图片</button>
+                <button class="pick" data-pick="textImage" data-kind="image">选择图片</button>
               </div>
               <button class="primary" id="runTextDecode">解码图片</button>
               <textarea id="textDecoded" placeholder="解码结果会显示在这里"></textarea>

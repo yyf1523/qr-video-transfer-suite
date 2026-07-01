@@ -1371,12 +1371,25 @@ def recover_missing_chunks_with_fec(db: dict[tuple[int, str], FileRecord], stats
         print(f"[INFO] FEC recovered chunks: {recovered_total}")
 
 
-def reconstruct_files(db: dict[tuple[int, str], FileRecord], output_dir: Path) -> int:
+def reconstruct_files(
+    db: dict[tuple[int, str], FileRecord],
+    output_dir: Path,
+    rename_map: dict[tuple[int, str], str] | None = None,
+) -> int:
+    """Write every fully-received file under output_dir.
+
+    rename_map maps a (file_type, file_name) key to an alternate output name.
+    The alternate name is still passed through safe_relative_name and confined to
+    the output root (commonpath check below), so renaming cannot escape the
+    target directory or overwrite files outside it.
+    """
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    rename_map = rename_map or {}
     failed = 0
 
-    for (file_type, file_name), record in sorted(db.items(), key=lambda item: item[0]):
+    for key, record in sorted(db.items(), key=lambda item: item[0]):
+        file_type, file_name = key
         received = len(record.chunks)
         if received != record.total:
             missing = [str(i + 1) for i in range(record.total) if i not in record.chunks]
@@ -1389,7 +1402,8 @@ def reconstruct_files(db: dict[tuple[int, str], FileRecord], output_dir: Path) -
             failed += 1
             continue
 
-        relative_name = Path(*safe_relative_name(file_name).split("/"))
+        output_name = rename_map.get(key, file_name)
+        relative_name = Path(*safe_relative_name(output_name).split("/"))
         target_root = output_dir / "lib" if file_type == FILE_TYPE_JAR else output_dir
         target_path = (target_root / relative_name).resolve()
         resolved_root = target_root.resolve()
@@ -1404,9 +1418,48 @@ def reconstruct_files(db: dict[tuple[int, str], FileRecord], output_dir: Path) -
             for index in range(record.total):
                 out.write(record.chunks[index])
         os.replace(tmp_path, target_path)
+        if output_name != file_name:
+            print(f"[INFO] Output renamed from video name: {file_name} -> {output_name}")
         print(f"[DONE] Reconstructed: {target_path}")
 
     return failed
+
+
+def archive_extension(file_name: str) -> str:
+    """Return the archive suffix of file_name.
+
+    Multi-part suffixes (.tar.gz, .tar.xz, ...) are matched first so that
+    "project.tar.gz" keeps both parts; otherwise fall back to the last single
+    suffix, or ".zip" when the name has no extension at all.
+    """
+    lower_name = file_name.lower()
+    for suffix in (".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst"):
+        if lower_name.endswith(suffix):
+            return suffix
+    return Path(file_name).suffix or ".zip"
+
+
+def video_named_source_output(db: dict[tuple[int, str], FileRecord], video_path: Path) -> dict[tuple[int, str], str]:
+    """Map the single decoded source archive to a name derived from the video stem.
+
+    Returns an empty rename map unless exactly one FILE_TYPE_SOURCE file is
+    present, so multi-file transfers keep their embedded names and are never
+    misnamed by an ambiguous video-based rename.
+    """
+    source_keys = [key for key in db if key[0] == FILE_TYPE_SOURCE]
+    if len(source_keys) != 1:
+        return {}
+    key = source_keys[0]
+    extension = archive_extension(key[1])
+    return {key: f"{video_path.stem}{extension}"}
+
+
+def reconstruct_files_with_args(db: dict[tuple[int, str], FileRecord], args: argparse.Namespace) -> int:
+    """reconstruct_files wrapper that applies the --name-single-source-from-video option."""
+    rename_map = {}
+    if getattr(args, "name_single_source_from_video", False) and args.video:
+        rename_map = video_named_source_output(db, Path(args.video))
+    return reconstruct_files(db, Path(args.output), rename_map=rename_map)
 
 
 def parse_record_region(raw_region: str) -> dict[str, int]:
@@ -1634,7 +1687,7 @@ def decode_video(args: argparse.Namespace) -> int:
     recover_missing_chunks_with_fec(db, stats)
     save_state(db, state_dir, decode_checkpoint(video_path, stats.video_frames))
     write_missing_reports(db, state_dir)
-    failed = reconstruct_files(db, Path(args.output))
+    failed = reconstruct_files_with_args(db, args)
     return 1 if failed else 0
 
 
@@ -1755,7 +1808,7 @@ def decode_fast_screen_video(args: argparse.Namespace) -> int:
     recover_missing_chunks_with_fec(db, stats)
     save_state(db, state_dir, decode_checkpoint(video_path, stats.video_frames))
     write_missing_reports(db, state_dir)
-    failed = reconstruct_files(db, Path(args.output))
+    failed = reconstruct_files_with_args(db, args)
     return 1 if failed else 0
 
 
@@ -1765,6 +1818,7 @@ def parse_args(argv: Iterable[str]) -> argparse.Namespace:
     )
     parser.add_argument("video", nargs="?", help="Phone-recorded or screen-recorded video path.")
     parser.add_argument("-o", "--output", default=".\\reconstructed_project", help="Output directory.")
+    parser.add_argument("--name-single-source-from-video", action="store_true", help="When one source archive is decoded, name it after the input video stem.")
     parser.add_argument("--state-dir", default=".\\decode_state", help="Resume state directory. Reuse it across multiple videos.")
     parser.add_argument("--manifest-json", help="Encoder manifest JSON. Use it to report files with zero captured chunks.")
     parser.add_argument("--record-screen", action="store_true", help="Record the desktop to a video before decoding.")

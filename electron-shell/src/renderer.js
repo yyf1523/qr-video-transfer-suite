@@ -4,12 +4,223 @@ const runtimeBadge = $("runtimeBadge");
 const WINDOWS_WORKERS = "6";
 const LINUX_WORKERS = "4";
 const DEFAULT_MEMORY_GB = "6";
+// 加码 / 解码模式采用"数据驱动"设计：每个预设集中声明命令行参数(args)与界面展示(title/summary/values)，
+// UI 通过下拉选择键名，运行时直接展开 args。新增模式只需在此追加一项，无需改动事件逻辑。
+const ENCODE_MODE_PRESETS = {
+  balanced: {
+    title: "平衡稳定版",
+    summary: "Windows 本地截图工具录屏、云桌面 1896×990 推荐。速度和成功率比较均衡。",
+    args: [
+      "--payload-mode", "binary",
+      "--qr-error-correction", "H",
+      "--qr-version", "30",
+      "--box-size", "3",
+      "--chunk-size", "680",
+      "--fps", "30",
+      "--repeat", "3",
+      "--passes", "1",
+      "--grid-cols", "4",
+      "--grid-rows", "1",
+      "--grid-gap", "10",
+      "--canvas-width", "1896",
+      "--canvas-height", "990",
+      "--label-height", "64",
+      "--label-scale", "0.45",
+      "--label-thickness", "1",
+      "--meta-qr-size", "48",
+      "--meta-qr-version", "6",
+      "--meta-qr-box-size", "2",
+      "--color-border", "8",
+      "--outer-white", "4",
+      "--fec-group-size", "100",
+      "--fec-parity-chunks", "20"
+    ],
+    values: [
+      ["二维码布局", "4 个横排"],
+      ["画布分辨率", "1896×990"],
+      ["QR 版本 / 模块像素", "v30 / 3px"],
+      ["分片大小", "680 字节"],
+      ["帧率 / 重复", "30 FPS / 每片 3 帧"],
+      ["纠错 / 冗余", "ECC-H / FEC 100+20"],
+      ["适用场景", "Windows 截图工具录屏、云桌面窗口轻微缩放"]
+    ]
+  },
+  fast: {
+    title: "高速直录版",
+    summary: "适合 1920×1080 全屏、无缩放、画质清晰的录制环境。速度最快，抗缩放能力较弱。",
+    args: [
+      "--payload-mode", "binary",
+      "--qr-error-correction", "H",
+      "--qr-version", "40",
+      "--box-size", "2",
+      "--chunk-size", "1100",
+      "--fps", "30",
+      "--repeat", "2",
+      "--passes", "1",
+      "--grid-cols", "4",
+      "--grid-rows", "1",
+      "--grid-gap", "10",
+      "--canvas-width", "1920",
+      "--canvas-height", "1080",
+      "--label-height", "64",
+      "--label-scale", "0.45",
+      "--label-thickness", "1",
+      "--meta-qr-size", "48",
+      "--meta-qr-version", "6",
+      "--meta-qr-box-size", "2",
+      "--color-border", "8",
+      "--outer-white", "4",
+      "--fec-group-size", "100",
+      "--fec-parity-chunks", "12"
+    ],
+    values: [
+      ["二维码布局", "4 个横排"],
+      ["画布分辨率", "1920×1080"],
+      ["QR 版本 / 模块像素", "v40 / 2px"],
+      ["分片大小", "1100 字节"],
+      ["帧率 / 重复", "30 FPS / 每片 2 帧"],
+      ["纠错 / 冗余", "ECC-H / FEC 100+12"],
+      ["适用场景", "全屏无缩放直录、专用播放器全屏播放"]
+    ]
+  },
+  window2: {
+    title: "窗口稳妥版",
+    summary: "适合本地竖屏、远程桌面窗口较小、录屏软件会压缩画面的情况。",
+    args: [
+      "--payload-mode", "binary",
+      "--qr-error-correction", "H",
+      "--qr-version", "30",
+      "--box-size", "4",
+      "--chunk-size", "680",
+      "--fps", "30",
+      "--repeat", "3",
+      "--passes", "1",
+      "--grid-cols", "2",
+      "--grid-rows", "1",
+      "--grid-gap", "10",
+      "--canvas-width", "1280",
+      "--canvas-height", "720",
+      "--label-height", "64",
+      "--label-scale", "0.45",
+      "--label-thickness", "1",
+      "--meta-qr-size", "56",
+      "--meta-qr-version", "6",
+      "--meta-qr-box-size", "2",
+      "--color-border", "8",
+      "--outer-white", "4",
+      "--fec-group-size", "100",
+      "--fec-parity-chunks", "24"
+    ],
+    values: [
+      ["二维码布局", "2 个横排"],
+      ["画布分辨率", "1280×720"],
+      ["QR 版本 / 模块像素", "v30 / 4px"],
+      ["分片大小", "680 字节"],
+      ["帧率 / 重复", "30 FPS / 每片 3 帧"],
+      ["纠错 / 冗余", "ECC-H / FEC 100+24"],
+      ["适用场景", "竖屏电脑、远程窗口录制、画面被压小"]
+    ]
+  },
+  safe1: {
+    title: "超稳兜底版",
+    summary: "给压缩严重、丢块多、反复失败的视频用。最慢，但二维码最大、容错最高。",
+    args: [
+      "--payload-mode", "binary",
+      "--qr-error-correction", "H",
+      "--qr-version", "30",
+      "--box-size", "4",
+      "--chunk-size", "680",
+      "--fps", "30",
+      "--repeat", "4",
+      "--passes", "1",
+      "--grid-cols", "1",
+      "--grid-rows", "1",
+      "--grid-gap", "10",
+      "--canvas-width", "960",
+      "--canvas-height", "720",
+      "--label-height", "64",
+      "--label-scale", "0.45",
+      "--label-thickness", "1",
+      "--meta-qr-size", "56",
+      "--meta-qr-version", "6",
+      "--meta-qr-box-size", "2",
+      "--color-border", "8",
+      "--outer-white", "4",
+      "--fec-group-size", "100",
+      "--fec-parity-chunks", "30"
+    ],
+    values: [
+      ["二维码布局", "1 个"],
+      ["画布分辨率", "960×720"],
+      ["QR 版本 / 模块像素", "v30 / 4px"],
+      ["分片大小", "680 字节"],
+      ["帧率 / 重复", "30 FPS / 每片 4 帧"],
+      ["纠错 / 冗余", "ECC-H / FEC 100+30"],
+      ["适用场景", "压缩严重、窗口很小、前几种模式仍缺块"]
+    ]
+  }
+};
+const DECODE_MODE_PRESETS = {
+  winRecord: {
+    title: "Windows 录屏稳健",
+    summary: "默认推荐。适合 Windows 截图工具录出来的 MP4，自动读取参数二维码并逐帧扫描。",
+    args: ["--auto-params", "--noise-robust", "--fallback-max-side", "1920", "--progress-every", "120"],
+    values: [
+      ["参数读取", "自动读取 QVP1 参数二维码"],
+      ["扫描方式", "由参数二维码自动决定 4QR / 2QR / 1QR"],
+      ["容错增强", "开启噪声增强和 1920px 全帧回退"],
+      ["进度刷新", "每 120 帧输出一次"]
+    ]
+  },
+  auto: {
+    title: "自动匹配",
+    summary: "适合新版本工具生成的视频。速度较快，优先相信视频开头的参数二维码。",
+    args: ["--auto-params"],
+    values: [
+      ["参数读取", "自动读取 QVP1 参数二维码"],
+      ["扫描方式", "由参数二维码自动匹配"],
+      ["适用场景", "清晰录屏、专用播放器全屏录制"]
+    ]
+  },
+  fast4: {
+    title: "旧版高速 4QR",
+    summary: "兼容早期 4QR / 30FPS / FEC 视频，适合清晰且无明显缩放的录屏。",
+    args: ["--screen-fast-fec-4qr", "--auto-params"],
+    values: [
+      ["参数读取", "自动读取，兼容旧 4QR 预设"],
+      ["扫描方式", "快速全帧扫描"],
+      ["适用场景", "旧版高速 4QR 视频"]
+    ]
+  },
+  redbox: {
+    title: "红框慢速救援",
+    summary: "视频已经缺块很多时使用。按红色定位框逐块校正，速度慢，适合补救尝试。",
+    args: [
+      "--screen-grid",
+      "--no-fast-screen",
+      "--no-auto-params",
+      "--noise-robust",
+      "--max-contours", "20",
+      "--min-red-area", "1000",
+      "--decode-padding", "72",
+      "--progress-every", "120"
+    ],
+    values: [
+      ["参数读取", "从普通帧内识别参数，不做开头快扫"],
+      ["扫描方式", "红框定位 + 透视校正"],
+      ["定位数量", "每帧最多检查 20 个红框"],
+      ["白边补偿", "72px"],
+      ["适用场景", "录屏压缩明显、快速解码缺块严重"]
+    ]
+  }
+};
 let defaultWorkers = WINDOWS_WORKERS;
 const runsById = new Map();
 let activeProgressRunId = null;
 let recordingRunId = null;
 let recordingStartedAt = 0;
 let recordingTimer = null;
+let recordingMonitors = [];
 
 function toolTitle(toolId) {
   if (toolId === "videoEncode") return "视频加码";
@@ -76,6 +287,42 @@ function appendPerformanceDefaults(args, rawExtra) {
     args.push("--memory-gb", DEFAULT_MEMORY_GB);
   }
   args.push(...extraArgs);
+}
+
+// 按下拉框当前值取预设；下拉不存在或值非法时回退到 fallback，保证始终返回一个有效预设。
+function selectedPreset(selectId, presets, fallback) {
+  const selected = $(selectId)?.value || fallback;
+  return presets[selected] || presets[fallback];
+}
+
+// 把预设的展示信息渲染成 标题 + 说明 + 参数键值表；容器或预设缺失时安全跳过。
+function renderPresetDetail(containerId, preset) {
+  const container = $(containerId);
+  if (!container || !preset) return;
+  const title = document.createElement("strong");
+  title.textContent = preset.title;
+  const summary = document.createElement("p");
+  summary.textContent = preset.summary;
+  const list = document.createElement("dl");
+  for (const [name, value] of preset.values) {
+    const term = document.createElement("dt");
+    term.textContent = name;
+    const detail = document.createElement("dd");
+    detail.textContent = value;
+    list.append(term, detail);
+  }
+  container.replaceChildren(title, summary, list);
+}
+
+function refreshModeDetails() {
+  renderPresetDetail("encModeDetail", selectedPreset("encMode", ENCODE_MODE_PRESETS, "balanced"));
+  renderPresetDetail("decModeDetail", selectedPreset("decMode", DECODE_MODE_PRESETS, "winRecord"));
+}
+
+function wireModePresets() {
+  $("encMode")?.addEventListener("change", refreshModeDetails);
+  $("decMode")?.addEventListener("change", refreshModeDetails);
+  refreshModeDetails();
 }
 
 function applyPlatformDefaults(info) {
@@ -230,6 +477,56 @@ function ensureExtension(filePath, extension) {
   return trimmed.toLowerCase().endsWith(extension.toLowerCase()) ? trimmed : `${trimmed}${extension}`;
 }
 
+// 拆分路径为 { 目录, 文件名, 分隔符 }，兼容 Windows "\\" 与 POSIX "/"。
+// 没有分隔符时（纯文件名）返回 { dir: "", base }，此时不含 sep —— joinPath 会因 dir 为空而忽略分隔符。
+function splitPath(filePath) {
+  const value = String(filePath || "").trim();
+  const index = Math.max(value.lastIndexOf("\\"), value.lastIndexOf("/"));
+  if (index < 0) return { dir: "", base: value };
+  return { dir: value.slice(0, index), base: value.slice(index + 1), sep: value[index] };
+}
+
+// 用原始分隔符拼回路径；dir 为空时直接返回文件名，避免出现前导分隔符。
+function joinPath(dir, base, sep = "\\") {
+  return dir ? `${dir}${sep}${base}` : base;
+}
+
+// 已知扩展名表。多段扩展名（.tar.gz）必须排在单段（.gz）之前，
+// 否则 "a.tar.gz" 会先命中 .gz 而只剥掉一段。
+const ARCHIVE_EXTENSIONS = [".tar.gz", ".tar.xz", ".tar.bz2", ".tar.zst", ".zip", ".7z", ".tgz", ".tar", ".gz"];
+const VIDEO_EXTENSIONS = [".mp4", ".avi", ".mov", ".mkv", ".webm"];
+
+// 去掉文件名末尾的已知扩展名：命中 suffixes 中的（可能多段的）扩展名时整体剥离，
+// 否则回退到最后一个 "." 之前；index > 0 的判断保留形如 ".gitignore" 这类以点开头的名字。
+function stripSuffix(fileName, suffixes) {
+  const lower = fileName.toLowerCase();
+  for (const suffix of suffixes) {
+    if (lower.endsWith(suffix)) return fileName.slice(0, -suffix.length);
+  }
+  const index = fileName.lastIndexOf(".");
+  return index > 0 ? fileName.slice(0, index) : fileName;
+}
+
+// 压缩包路径 → 同目录、同名的 .mp4 输出路径（沿用原始路径分隔符）。
+function defaultEncodedVideoPathForArchive(archivePath) {
+  const { dir, base, sep } = splitPath(archivePath);
+  const name = stripSuffix(base, ARCHIVE_EXTENSIONS);
+  return joinPath(dir, `${name}.mp4`, sep);
+}
+
+// 视频路径 → 同目录、以视频名为目录名的解码输出目录。
+function defaultDecodeOutputDirForVideo(videoPath) {
+  const { dir, base, sep } = splitPath(videoPath);
+  return joinPath(dir, stripSuffix(base, VIDEO_EXTENSIONS), sep);
+}
+
+// 是否应把输出路径替换为"依据输入自动推导的默认值"：
+// 仅当用户提供了输入、且当前输出为空或仍是初始占位默认值时才替换，
+// 从而不会覆盖用户手动填写的输出路径。
+function shouldUseDerivedOutput(input, currentOutput, placeholder) {
+  return Boolean(input) && (!currentOutput || currentOutput === placeholder);
+}
+
 function activateTab(tabName) {
   const tab = document.querySelector(`.tab[data-tab="${tabName}"]`);
   const panel = $(`panel-${tabName}`);
@@ -272,11 +569,23 @@ function wirePickers() {
           if (value) value = ensureExtension(value, ".png");
         } else if (kind === "video") {
           value = await window.qrSuite.openFile({ title: "选择视频文件", filters: [{ name: "视频", extensions: ["mp4", "avi", "mov", "mkv", "webm"] }] });
+        } else if (kind === "manifest") {
+          value = await window.qrSuite.openFile({ title: "选择 manifest.json", filters: [{ name: "JSON", extensions: ["json"] }] });
+        } else if (kind === "image") {
+          value = await window.qrSuite.openFile({ title: "选择二维码图片", filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "bmp", "webp"] }] });
         } else {
           value = await window.qrSuite.openFile();
         }
         if (value) {
           target.value = value;
+          if (target.id === "encSource") {
+            $("encOutput").value = defaultEncodedVideoPathForArchive(value);
+            log(`输出视频默认使用压缩包同名：${$("encOutput").value}`);
+          }
+          if (target.id === "decVideo") {
+            $("decOutput").value = defaultDecodeOutputDirForVideo(value);
+            log(`解码输出目录默认使用视频同名：${$("decOutput").value}`);
+          }
           log(`已选择：${value}`);
         }
       } catch (error) {
@@ -334,6 +643,7 @@ async function refreshRecordingMonitors() {
   button.textContent = "读取中...";
   try {
     const monitors = await window.qrSuite.listRecordingMonitors();
+    recordingMonitors = monitors;
     select.replaceChildren();
     for (const monitor of monitors) {
       const option = document.createElement("option");
@@ -346,11 +656,38 @@ async function refreshRecordingMonitors() {
     else if (select.options.length > 1) select.value = "1";
     log(`已读取 ${monitors.length} 个录制范围。`);
   } catch (error) {
+    recordingMonitors = [];
     log(`读取屏幕失败：${error.message}`);
   } finally {
     button.disabled = false;
     button.textContent = "刷新屏幕";
   }
+}
+
+// 取当前选中的录制显示器：优先匹配下拉框选的 index，其次退回 1 号屏，再退回第一个，最后 null。
+// 返回的 monitor 字段来自 Python 端 mss 枚举（index/label/left/top/width/height，坐标为物理像素）。
+function selectedRecordingMonitor() {
+  const selected = Number($("recordMonitor").value || 1);
+  return recordingMonitors.find((monitor) => Number(monitor.index) === selected)
+    || recordingMonitors.find((monitor) => Number(monitor.index) === 1)
+    || recordingMonitors[0]
+    || null;
+}
+
+// 把遮罩层里框选的矩形换算成 ffmpeg/gdigrab 需要的 "left,top,width,height" 物理像素区域。
+// selection 的坐标是遮罩窗口内的 CSS 像素(DIP)，viewportWidth/Height 为遮罩窗口尺寸(DIP)；
+// monitor.* 是 mss 报告的物理像素。因此用 物理像素/DIP 的比例做缩放，再叠加显示器物理原点偏移。
+// 分母用 Math.max(1, ...) 防止除零；宽高至少为 1 像素，避免生成非法的 0 尺寸区域。
+// 注意：此处假设 renderer 的 mss monitor.index 与 main 进程按 Electron 排序选中的显示器指向同一块屏幕，
+//       在非常规多屏布局下二者顺序可能不一致（详见 main.cjs displayForRecordingMonitor 注释）。
+function mapSelectionToMonitorRegion(selection, monitor) {
+  const widthRatio = monitor.width / Math.max(1, selection.viewportWidth);
+  const heightRatio = monitor.height / Math.max(1, selection.viewportHeight);
+  const left = Math.round(monitor.left + selection.x * widthRatio);
+  const top = Math.round(monitor.top + selection.y * heightRatio);
+  const width = Math.max(1, Math.round(selection.width * widthRatio));
+  const height = Math.max(1, Math.round(selection.height * heightRatio));
+  return `${left},${top},${width},${height}`;
 }
 
 function startRecordingClock() {
@@ -421,6 +758,42 @@ function wireMediaTasks() {
     }
   });
 
+  $("selectRecordRegion").addEventListener("click", async () => {
+    if (recordingRunId) {
+      $("recordStatusText").textContent = "录制中不能重新框选区域。";
+      return;
+    }
+    const monitor = selectedRecordingMonitor();
+    if (!monitor || Number(monitor.index) === 0) {
+      $("recordStatusText").textContent = "请先选择一个具体屏幕，再框选录制区域。";
+      setRecordingIndicator("error", "请选择屏幕");
+      return;
+    }
+    const button = $("selectRecordRegion");
+    button.disabled = true;
+    $("recordStatusText").textContent = "请在弹出的遮罩层中拖拽选择录制区域。";
+    setRecordingIndicator("idle", "正在框选");
+    try {
+      const selection = await window.qrSuite.selectRecordingRegion({ monitor: Number(monitor.index) });
+      if (!selection) {
+        $("recordStatusText").textContent = "已取消框选。";
+        setRecordingIndicator("idle", "已就绪");
+        return;
+      }
+      const region = mapSelectionToMonitorRegion(selection, monitor);
+      $("recordRegion").value = region;
+      $("recordStatusText").textContent = `已选择录制区域：${region}`;
+      setRecordingIndicator("idle", "区域已选");
+      log(`已框选录制区域：${region}`);
+    } catch (error) {
+      $("recordStatusText").textContent = `框选失败：${error.message}`;
+      setRecordingIndicator("error", "框选失败");
+      log(`框选录制区域失败：${error.message}`);
+    } finally {
+      button.disabled = false;
+    }
+  });
+
   const startButton = $("startRecording");
   startButton.dataset.label = startButton.textContent;
   startButton.addEventListener("click", async () => {
@@ -451,7 +824,7 @@ function wireMediaTasks() {
     runsById.set(runId, state);
 
     try {
-      const selectedFps = document.querySelector('input[name="recordFps"]:checked')?.value || "30";
+      const selectedFps = document.querySelector('input[name="recordFps"]:checked')?.value || "60";
       const task = await window.qrSuite.startRecording({
         runId,
         output,
@@ -511,15 +884,20 @@ function wireVideoTasks() {
   encodeButton.dataset.label = encodeButton.textContent;
   encodeButton.addEventListener("click", async () => {
     const args = [];
-    if ($("encSource").value.trim()) args.push("--source", $("encSource").value.trim());
-    const rawOutput = $("encOutput").value.trim() || "hd_secure_stream.mp4";
+    const source = $("encSource").value.trim();
+    if (source) args.push("--source", source);
+    const currentOutput = $("encOutput").value.trim();
+    const shouldUseSourceName = shouldUseDerivedOutput(source, currentOutput, "hd_secure_stream.mp4");
+    const rawOutput = shouldUseSourceName ? defaultEncodedVideoPathForArchive(source) : (currentOutput || "hd_secure_stream.mp4");
     const output = ensureExtension(rawOutput, ".mp4");
     if (output !== rawOutput) {
       $("encOutput").value = output;
       log(`输出路径已自动改为 MP4：${output}`);
+    } else if (!$("encOutput").value.trim() || shouldUseSourceName) {
+      $("encOutput").value = output;
     }
     args.push("-o", output);
-    if ($("encFastFec").checked) args.push("--fast-fec-4qr");
+    args.push(...selectedPreset("encMode", ENCODE_MODE_PRESETS, "balanced").args);
     if ($("encPipeOutput").checked) args.push("--mp4-profile", "uos-pipe");
     if ($("encHardwareH264").checked) args.push("--h264-encoder", "h264_vaapi");
     appendPerformanceDefaults(args, $("encExtra").value);
@@ -530,11 +908,17 @@ function wireVideoTasks() {
   decodeButton.dataset.label = decodeButton.textContent;
   decodeButton.addEventListener("click", async () => {
     const args = [];
-    if ($("decVideo").value.trim()) args.push($("decVideo").value.trim());
-    if ($("decFastFec").checked) args.push("--screen-fast-fec-4qr");
+    const video = $("decVideo").value.trim();
+    if (video) args.push(video);
+    args.push(...selectedPreset("decMode", DECODE_MODE_PRESETS, "winRecord").args);
+    args.push("--name-single-source-from-video");
     if ($("decManifest").value.trim()) args.push("--manifest-json", $("decManifest").value.trim());
     args.push("--state-dir", defaultDecodeStatePath());
-    args.push("-o", $("decOutput").value.trim() || "reconstructed_project");
+    const currentDecodeOutput = $("decOutput").value.trim();
+    const shouldUseVideoName = shouldUseDerivedOutput(video, currentDecodeOutput, "reconstructed_project");
+    const outputDir = shouldUseVideoName ? defaultDecodeOutputDirForVideo(video) : (currentDecodeOutput || "reconstructed_project");
+    if (!currentDecodeOutput || shouldUseVideoName) $("decOutput").value = outputDir;
+    args.push("-o", outputDir);
     appendPerformanceDefaults(args, $("decExtra").value);
     await runStreamingTask(decodeButton, "videoDecode", args);
   });
@@ -634,6 +1018,7 @@ async function boot() {
   wireWindowControls();
   wireTabs();
   wirePickers();
+  wireModePresets();
   wireVideoTasks();
   wireMediaTasks();
   wireTextTasks();
